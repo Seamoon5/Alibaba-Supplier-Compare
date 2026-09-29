@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alibaba Supplier Compare</title>
+<link rel="stylesheet" href="panel.css">
+</head>
+<body>
+
+<header class="hdr">
+  <div class="hdr-title">
+    <span class="hdr-name">Supplier Compare</span>
+    <span class="hdr-count" id="hdrCount" hidden>0</span>
+  </div>
+  <div class="hdr-actions">
+    <button class="icon-btn" id="btnRescan" title="Re-scan the current tab" aria-label="Re-scan the current tab">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
+    </button>
+    <button class="icon-btn" id="btnSettings" title="Filters and settings" aria-label="Filters and settings" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="7" cy="18" r="2"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="ctrl">
+  <label class="ctrl-qty">
+    <span class="ctrl-label">Target qty</span>
+    <input type="number" id="inpQty" min="1" step="1" value="1" inputmode="numeric" aria-describedby="qtyHelp">
+  </label>
+  <p class="ctrl-help" id="qtyHelp">Prices below are per unit at this quantity.</p>
+</div>
+
+<div class="filters" id="filters" hidden>
+  <label class="chk"><input type="checkbox" id="fVerified"><span>Verified suppliers only</span></label>
+  <label class="chk"><input type="checkbox" id="fManufacturers"><span>Factories only</span></label>
+  <label class="chk"><input type="checkbox" id="fBelowMoq"><span>Hide below-MOQ</span></label>
+  <label class="chk"><input type="checkbox" id="fLowConf"><span>Hide partial data</span></label>
+  <div class="filters-foot">
+    <button class="btn btn-ghost" id="btnDiagnostics">Copy diagnostic snapshot</button>
+    <button class="btn btn-ghost" id="btnReset">Reset saved data</button>
+  </div>
+</div>
+
+<div id="banner" class="banner" hidden>
+  <div class="banner-icon" id="bannerIcon" aria-hidden="true">!</div>
+  <div class="banner-body">
+    <p class="banner-title" id="bannerTitle"></p>
+    <p class="banner-text" id="bannerText"></p>
+  </div>
+  <button class="btn btn-sm" id="bannerAction" hidden></button>
+  <button class="icon-btn icon-btn-sm" id="bannerClose" aria-label="Dismiss">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </button>
+</div>
+
+<div class="scanning" id="scanning" hidden>
+  <div class="shimmer"></div>
+  <p>Reading product data…</p>
+</div>
+
+<section class="empty" id="empty">
+  <div class="empty-mark" aria-hidden="true">
+    <svg viewBox="0 0 48 48"><rect x="6" y="10" width="10" height="28" rx="2"/><rect x="19" y="10" width="10" height="28" rx="2"/><rect x="32" y="10" width="10" height="28" rx="2"/></svg>
+  </div>
+  <h1 class="empty-title">Compare suppliers, not tabs</h1>
+  <p class="empty-text">
+    Open an Alibaba product page, then press the toolbar button. Its prices, MOQ and
+    credentials are added to a matrix you can read at a glance.
+  </p>
+  <ol class="steps">
+    <li>Open a product page on <strong>alibaba.com</strong></li>
+    <li>Press the <strong>Alibaba Supplier Compare</strong> toolbar button</li>
+    <li>Repeat for each supplier you are considering</li>
+    <li>Set your quantity above, then export</li>
+  </ol>
+</section>
+
+<main class="wrap" id="wrap" hidden>
+  <p class="fx-note" id="fxNote" hidden></p>
+  <div class="matrix-scroll" id="matrixScroll">
+    <table class="matrix" id="matrix">
+      <thead id="matrixHead"></thead>
+      <tbody id="matrixBody"></tbody>
+    </table>
+  </div>
+</main>
+
+<footer class="ftr" id="ftr" hidden>
+  <button class="btn btn-primary" id="btnTsv">Copy for Sheets</button>
+  <button class="btn" id="btnQuote">Quote summary</button>
+  <div class="ftr-more">
+    <button class="btn btn-ghost" id="btnCsv">CSV</button>
+    <button class="btn btn-ghost" id="btnClear">Clear</button>
+  </div>
+</footer>
+
+<div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
+
+<script type="module" src="panel.js"></script>
+</body>
+</html>

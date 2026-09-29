@@ -1,0 +1,42 @@
+// ============================================================================
+//  PROJECT PERMISSION TEMPLATE  (for Salman)
+//  ------------------------------------------------
+//  HOW TO USE:
+//   1. Copy this file into a project folder and rename it to:  opencode.jsonc
+//   2. Start opencode from inside that folder.
+//   3. Result: opencode asks you the first time, then remembers for that
+//      project. A different project without this file asks again.
+//
+//  WHAT THE RULES MEAN:
+//     "allow"  -> opencode does it WITHOUT asking
+//     "ask"    -> opencode ALWAYS asks you first
+//     "deny"   -> opencode is BLOCKED from doing it (totally safe)
+// ============================================================================
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  "permission": {
+    // --- Safe, everyday things: no questions ---
+    "read": "allow",          // reading files
+    "edit": "allow",          // saving/editing project files
+    "webfetch": "allow",      // reading web pages
+    "websearch": "allow",     // searching the web
+
+    // --- Shell commands: safe ones run freely, everything else asks ---
+    "bash": {
+      "*": "ask",             // default: ask me
+      "git *": "allow",       // git add/commit/status/log/push...
+      "grep *": "allow",      // searching text inside files
+      "ls *": "allow",        // listing folders
+      "pwd": "allow",         // "where am I" - harmless
+      "bun *": "allow",       // bun commands
+      "npm *": "allow",       // npm commands
+      "node *": "allow"       // running node scripts
+      // NOTE: python3, rm, and anything else will still ASK you.
+      //       Add more safe commands here if you get too many questions.
+    },
+
+    // --- Outside this project folder (e.g. Desktop, Downloads): always ask ---
+    "external_directory": "ask"
+  }
+}

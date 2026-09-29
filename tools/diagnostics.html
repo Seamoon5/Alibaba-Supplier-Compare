@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alibaba Supplier Compare — extractor diagnostics</title>
+<style>
+  :root {
+    --canvas:#FBFAF8; --surface:#FFF; --surface-2:#F3F1ED; --ink:#16181D;
+    --ink-soft:#5C6470; --ink-faint:#8A919C; --line:#E6E3DE;
+    --accent:#3A5BC7; --best:#17795E; --warn:#9A6700; --danger:#B3261E;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px; background:var(--canvas); color:var(--ink);
+         font:400 14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; letter-spacing: -.01em; }
+  .sub { margin: 0 0 20px; color: var(--ink-soft); font-size: 13px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+          padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+       color: var(--ink-soft); margin: 0 0 10px; }
+  textarea { width: 100%; height: 190px; padding: 10px; resize: vertical;
+             font: 400 12px/1.5 var(--mono); color: var(--ink);
+             background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+  button { min-height: 32px; padding: 0 14px; font: 500 13px/1 system-ui,sans-serif;
+           color: #fff; background: var(--accent); border: 1px solid var(--accent);
+           border-radius: 6px; cursor: pointer; }
+  button.ghost { color: var(--ink); background: var(--surface-2); border-color: var(--line); }
+  button:hover { filter: brightness(.96); }
+  .msg { margin-top: 10px; font-size: 13px; padding: 8px 10px; border-radius: 6px; }
+  .msg.err { color: var(--danger); background: rgba(179,38,30,.08); }
+  .msg.ok  { color: var(--best); background: rgba(23,121,94,.08); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); }
+  code, .mono { font-family: var(--mono); font-size: 12px; }
+  .pill { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 11px;
+          font-weight: 600; white-space: nowrap; }
+  .t1 { color: var(--best); background: rgba(23,121,94,.12); }
+  .t2 { color: var(--accent); background: rgba(58,91,199,.12); }
+  .t4 { color: var(--warn); background: rgba(154,103,0,.12); }
+  .miss { color: var(--danger); background: rgba(179,38,30,.10); }
+  .muted { color: var(--ink-faint); }
+  ul.paths { margin: 0; padding-left: 18px; font-family: var(--mono); font-size: 12px;
+             color: var(--ink-soft); max-height: 240px; overflow: auto; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Extractor diagnostics</h1>
+  <p class="sub">
+    Paste a <code>window.detailData</code> blob copied from an Alibaba product page to check that
+    the extension still reads every field. Nothing is uploaded &mdash; the page runs entirely in
+    your browser. Use this before and after pasting a diagnostic snapshot into a bug report.
+  </p>
+
+  <div class="card">
+    <h2>1. Paste the blob</h2>
+    <textarea id="input" spellcheck="false" placeholder='{"componentsVO": { ... }}'></textarea>
+    <div class="row">
+      <button id="run">Test extraction</button>
+      <button class="ghost" id="sample">Load a sample blob</button>
+      <button class="ghost" id="clear">Clear</button>
+      <span class="muted" id="size"></span>
+    </div>
+    <div id="msg"></div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>2. Extracted record</h2>
+      <div id="out"><p class="muted">Nothing tested yet.</p></div>
+    </div>
+    <div class="card">
+      <h2>3. Field provenance</h2>
+      <div id="prov"><p class="muted">Nothing tested yet.</p></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>4. Key paths seen in the blob</h2>
+    <p class="sub" style="margin:-4px 0 10px">
+      If a field shows as <em>not found</em>, look for its real name in this list and add it to the
+      key patterns in <code>src/extract/normalize.js</code>.
+    </p>
+    <ul class="paths" id="paths"><li class="muted">Nothing tested yet.</li></ul>
+  </div>
+</div>
+
+<script type="module">
+import { normalize } from '../src/extract/normalize.js';
+import { PROVENANCE, FIELD_LABELS } from '../src/lib/schema.js';
+
+const $ = (id) => document.getElementById(id);
+
+const SAMPLE = {
+  globalData: { product: { productId: '1601918386232', subject: '3 Head Pure Chenille Embroidery Machine' } },
+  componentsVO: {
+    priceModule: {
+      currencyCode: 'USD', formatPrice: 'US $4,500-5,200',
+      productLadderPrices: [
+        { min: 1, max: 1, price: '5200.00' },
+        { min: 2, max: 4, price: '4850.00' },
+        { min: 5, max: null, price: '4500.00' },
+      ],
+    },
+    tradeModule: { moqNumber: '1', moqUnit: 'set', tradeAssurance: true },
+    companyModule: {
+      companyName: 'Hangzhou Richpeace Machinery Co., Ltd.', companyId: 'c-9912',
+      companyUrl: 'richpeace.en.alibaba.com/company_profile.html', countryName: 'China',
+      businessType: 'Manufacturer', year: 12, verifiedSupplier: true, responseRate: '95%',
+    },
+    shippingModule: { leadTime: [{ min: 1, max: null, days: 30 }] },
+    imageModule: { images: ['https://sc04.alicdn.com/example.jpg'] },
+  },
+};
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const PILL = {
+  [PROVENANCE.TIER1]: ['t1', 'known path'],
+  [PROVENANCE.TIER2]: ['t2', 'fuzzy walk'],
+  [PROVENANCE.TIER3]: ['t2', 'json+ld'],
+  [PROVENANCE.TIER4]: ['t4', 'page text'],
+  [PROVENANCE.MISSING]: ['miss', 'not found'],
+};
+
+/** Breadth-first key listing, mirroring what the extension records in diagnostics. */
+function keyPaths(root, prefix = '', depth = 0, acc = [], budget = { n: 4000 }) {
+  if (!root || typeof root !== 'object' || depth > 6 || budget.n <= 0) return acc;
+  if (Array.isArray(root)) { if (root.length) keyPaths(root[0], `${prefix}[]`, depth, acc, budget); return acc; }
+  for (const k of Object.keys(root)) {
+    if (budget.n-- <= 0) return acc;
+    const p = prefix ? `${prefix}.${k}` : k;
+    if (!acc.includes(p)) acc.push(p);
+    keyPaths(root[k], p, depth + 1, acc, budget);
+  }
+  return acc;
+}
+
+function render(message, tone) {
+  $('msg').innerHTML = message ? `<div class="msg ${tone}">${message}</div>` : '';
+}
+
+function run() {
+  const text = $('input').value.trim();
+  if (!text) return render('Paste a blob first, or load the sample.', 'err');
+
+  let blob;
+  try {
+    blob = JSON.parse(text);
+  } catch (err) {
+    return render(`That is not valid JSON: ${esc(err.message)}`, 'err');
+  }
+
+  const { record, diagnostics } = normalize({
+    ok: true, blob, url: 'https://www.alibaba.com/product-detail/_diag.html',
+    title: '', ld: [], keyPaths: [], dom: { title: '', image: '', url: '', companyName: '', companyUrl: '', text: '' },
+  });
+
+  // 2. record
+  const rows = Object.keys(FIELD_LABELS)
+    .map((f) => {
+      let v = record[f];
+      if (f === 'tierCount') v = record.priceTiers.length;
+      if (Array.isArray(v)) v = JSON.stringify(v);
+      if (typeof v === 'boolean') v = v ? 'true' : 'false';
+      if (v === null || v === '' || v === undefined) return '';
+      return `<tr><th>${esc(FIELD_LABELS[f])}</th><td class="mono">${esc(v)}</td></tr>`;
+    })
+    .join('');
+  $('out').innerHTML = rows || '<p class="muted">No fields extracted.</p>';
+
+  // 3. provenance
+  const provRows = diagnostics.layers
+    .sort((a, b) => a.field.localeCompare(b.field))
+    .map((l) => {
+      const [cls, label] = PILL[l.via] || ['miss', l.via];
+      return `<tr><td class="mono">${esc(l.field)}</td>
+        <td><span class="pill ${cls}">${esc(label)}</span></td>
+        <td>${l.ok ? '' : '<span class="pill miss">not found</span>'}</td></tr>`;
+    })
+    .join('');
+  $('prov').innerHTML = `<table><tr><th>Field</th><th>Read by</th><th></th></tr>${provRows}</table>`;
+
+  // 4. key paths
+  const paths = keyPaths(blob);
+  $('paths').innerHTML = paths.length
+    ? paths.map((p) => `<li>${esc(p)}</li>`).join('')
+    : '<li class="muted">No keys found.</li>';
+
+  const counts = diagnostics.tierCounts || {};
+  const summary = Object.entries(counts)
+    .map(([via, n]) => `${n} by ${(PILL[via] || ['', via])[1]}`).join(', ');
+  const bad = record.confidence === 'low';
+  render(
+    `${bad ? 'PARTIAL — missing: ' + record.missing.join(', ') : 'All core fields found.'} ` +
+    `${summary ? '| ' + summary : ''} | ${paths.length} key paths`,
+    bad ? 'err' : 'ok',
+  );
+}
+
+$('run').addEventListener('click', run);
+$('sample').addEventListener('click', () => { $('input').value = JSON.stringify(SAMPLE, null, 2); run(); });
+$('clear').addEventListener('click', () => {
+  $('input').value = '';
+  ['out', 'prov', 'paths', 'msg'].forEach((id) => { $(id).innerHTML = '<p class="muted">Nothing tested yet.</p>'; });
+  $('size').textContent = '';
+});
+$('input').addEventListener('input', () => {
+  const n = $('input').value.length;
+  $('size').textContent = n ? `${(n / 1024).toFixed(1)} KB pasted` : '';
+});
+</script>
+</body>
+</html>
