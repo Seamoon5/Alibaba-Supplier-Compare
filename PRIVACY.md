@@ -1,6 +1,12 @@
 # Privacy Policy — Alibaba Supplier Compare
 
-**Last updated: 29 September 2026**
+**Last updated: 29 September 2026 (v1.2.0)**
+
+### v1.2.0 change
+
+The extension now requests read access to `alibaba.com` pages rather than relying on a single-use
+`activeTab` grant, so that its Re-scan button works. It still cannot read any other site, and it
+still does not request the broad `tabs` permission. See "What it reads, and when" below.
 
 Alibaba Supplier Compare is a browser extension. This policy describes exactly what it does with
 your data. The short version: **it reads pages you opened yourself, keeps the result on your own
@@ -16,7 +22,7 @@ to a comparison list in the side panel.
 ## What the extension does not collect
 
 - No personal information about you
-- No browsing history. It runs only on the tab you press the button on.
+- No browsing history. It can only read pages on alibaba.com, and only when you press a button.
 - No files from your computer
 - No usage analytics, no tracking, no advertising, no telemetry of any kind
 - No cookies, no device identifiers, no fingerprinting
@@ -32,9 +38,14 @@ own clipboard, and the **Download CSV** file is saved by your own browser to a f
 
 ## What it reads, and when
 
-The extension asks for the `activeTab` permission. This means that only when you press its toolbar
-button does it get temporary access to the single tab you are looking at. It does not run on any
-page in the background, and it cannot read tabs you have not explicitly pointed it at.
+The extension has read access to pages on **alibaba.com** only. It asks for host permission limited
+to that domain, and deliberately does **not** ask for the broad `tabs` permission, so it cannot read
+the URL or title of any other site you visit.
+
+It only reads a page when you press its toolbar button or its **Re-scan** button. It does not run
+on any page in the background, and it does not read pages on any other site.
+
+If a page on another site is open in your tab bar, the extension cannot see it.
 
 ## Third-party services
 

@@ -120,10 +120,11 @@ If a field stops appearing, an update to Alibaba's markup is the likely cause.
 ## Development
 
 ```bash
-npm test        # 82 unit tests: comparison math, both extractors, all four layers, exports
-npm run icons   # regenerate the PNG icons (pure Python, no dependencies)
-npm run preview # render the side panel in a real browser and screenshot every state
-npm run verify  # pre-flight checks: manifest, icons, module graph, no remote code
+npm test         # 83 unit tests: comparison math, both extractors, all four layers, exports
+npm run icons    # regenerate the PNG icons (pure Python, no dependencies)
+npm run preview  # render the side panel in a real browser and screenshot every state
+npm run verify   # pre-flight checks: manifest, permissions, module graph, no remote code
+npm run live-test  # load the extension into a real browser and try it on a real Alibaba page
 ```
 
 The comparison math, both extractors, the four-layer reader and the brace-balanced JSON reader are
@@ -135,23 +136,38 @@ and suppliers that have no price at all.
 facts rather than just taking pictures: the matrix and the empty state, search and home page
 contexts, the verification-screen state, a supplier-origin matrix, and narrow and wide viewports.
 
+`npm run live-test` is the one that matters for extractor changes. It loads this extension into a
+real Chromium, points it at a live Alibaba page, and reports whether the page was reachable and
+whether the CAPTCHA interstitial was detected. From a datacenter IP you will normally get
+`BLOCKED (Alibaba CAPTCHA)`, which is itself the confirmation that the detection works. To
+validate the extractors against pages Alibaba will actually serve, run it from a machine with a
+logged-in Chrome profile, or press the toolbar button on a real page and send in the diagnostic
+snapshot from the panel.
+
 ## Privacy
 
 Everything stays on your computer in `chrome.storage.local`. No server, no account, no analytics,
 no network requests. See [PRIVACY.md](PRIVACY.md).
 
-The extension does **not** request the `tabs` permission, so it cannot read the URL of a tab the
-user has not pointed it at. That is why the panel sometimes says "Last seen on: …" rather than
-"Currently on: …" — it is telling you the page is from memory, not read live.
+The extension has standing read access to `alibaba.com` pages only, and the `tabs` permission is
+deliberately **not** requested, so it cannot see the URL or title of any other site you visit.
 
 ## Permissions, and why each is needed
 
 | Permission | Why |
 |---|---|
-| `activeTab` | Read the one product page you point the button at, only when you press it. This is why the extension does **not** need blanket access to `alibaba.com`. |
-| `scripting` | Inject the reader into that one page. |
+| `https://*.alibaba.com/*` (host access) | Read the product data and the page's own URL on Alibaba pages. Scoped to Alibaba and nothing else. |
+| `scripting` | Inject the reader into those pages. |
 | `sidePanel` | Show the comparison panel. |
 | `storage` | Keep your comparison and settings on your machine. |
+
+**Why host access rather than `activeTab`.** The first version asked for `activeTab` only, which
+grants access for a single invocation. That is genuinely more private, but the grant does not
+survive a navigation, so the **Re-scan button could not read the tab URL at all** — it reported
+"Not a product page" while sitting on a search results page, and could not inject into the page
+either. That is worse than a narrower permission list with a working button, so the extension now
+asks for Alibaba-only host access. It still cannot see any other site, and it does not request the
+broad `tabs` permission.
 
 ## Project layout
 
@@ -177,7 +193,8 @@ tools/
   diagnostics.html           offline extractor test harness
   panel-preview.mjs          render + screenshot the panel
   verify.mjs                 pre-flight / store-readiness checks
-test/                        82 unit tests
+  live-test.mjs              run the real extension against a real Alibaba page
+test/                        83 unit tests
 docs/screenshots/            panel states
 ```
 

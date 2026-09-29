@@ -22,7 +22,6 @@ import {
   getRecords, upsertRecord, upsertRecords, removeRecord, clearRecords,
   getSettings, saveSettings, saveDiagnostics, getDiagnostics,
   saveLastCapture, getLastCapture, clearLastCapture,
-  saveLastTab, getLastTab,
 } from './lib/store.js';
 import { recordKey } from './lib/schema.js';
 import { getExporter } from './lib/exporters/index.js';
@@ -200,39 +199,28 @@ async function captureTab(tabId, tabUrl) {
  * Persisting the result closes that race from both directions.
  */
 /**
- * The most recent tab URL we were allowed to see.
+ * The URL of the tab being captured.
  *
- * Reading tab.url requires either the "tabs" permission or an activeTab grant.
- * This extension asks for activeTab only, so a fresh side panel cannot read the
- * current tab's URL on its own. Rather than add "tabs" — which would let the
- * extension see every page the user visits and would contradict the privacy
- * promise in PRIVACY.md — we remember the URL from the moments we legitimately
- * had access, and fall back to that. It is flagged as stale so the panel can
- * say so rather than confidently describing the wrong page.
+ * host_permissions on alibaba.com makes this readable at any time, which is
+ * what Re-scan needs: the toolbar click used to supply a one-shot activeTab
+ * grant, and that grant did not survive a navigation, so pressing Re-scan after
+ * a search produced "Not a product page" on a search page.
  */
-let lastKnownTab = { url: '', at: 0 };
-
-function rememberTab(url) {
-  if (!url) return;
-  lastKnownTab = { url, at: Date.now() };
-  saveLastTab(lastKnownTab).catch(() => {});
-}
-
-async function currentTab() {
+async function activeTabUrl() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.url) {
-      rememberTab(tab.url);
-      return { url: tab.url, live: true, at: Date.now() };
-    }
+    return { url: tab?.url || '', id: tab?.id };
   } catch {
-    /* fall through to the cache */
+    return { url: '', id: undefined };
   }
-  return { url: lastKnownTab.url, live: false, at: lastKnownTab.at };
+}
+
+async function captureActive() {
+  const { url, id } = await activeTabUrl();
+  return captureAndReport(id, url);
 }
 
 async function captureAndReport(tabId, tabUrl) {
-  rememberTab(tabUrl);
   const kind = classifyUrl(tabUrl || '');
   const result = kind === 'search' || kind === 'home'
     ? await captureSearchTab(tabId, tabUrl)
@@ -324,18 +312,6 @@ async function captureSearchTab(tabId, tabUrl) {
   };
 }
 
-async function captureActiveTab() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab || typeof tab.id !== 'number') {
-    return {
-      ok: false,
-      state: 'error',
-      message: { tone: 'danger', title: 'No active tab', body: 'Switch to a product tab and try again.' },
-    };
-  }
-  return captureTab(tab.id, tab.url);
-}
-
 // ------------------------------------------------------------------ wiring
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -347,7 +323,6 @@ chrome.runtime.onStartup?.addListener(() => {
   chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch(() => {});
-  getLastTab().then((t) => { if (t) lastKnownTab = t; }).catch(() => {});
 });
 refreshBadge();
 
@@ -374,33 +349,19 @@ const HANDLERS = {
    * result it missed while it was still loading.
    */
   async GET_TAB_CONTEXT() {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    // The action click grants activeTab, so this is readable at that moment.
-    if (tab?.url) rememberTab(tab.url);
-
+    const { url } = await activeTabUrl();
     const stored = await getLastCapture();
     const fresh = stored && Date.now() - stored.at < CAPTURE_TTL_MS ? stored : null;
     if (!fresh) await clearLastCapture();
-
-    const url = tab?.url || lastKnownTab.url;
     return {
       url,
       kind: classifyUrl(url),
-      live: Boolean(tab?.url),
-      seenAt: tab?.url ? Date.now() : lastKnownTab.at,
       pendingResult: fresh ? fresh.result : null,
     };
   },
 
-  async CAPTURE({ tabId, tabUrl } = {}) {
-    let result;
-    if (typeof tabId === 'number') {
-      result = await captureAndReport(tabId, tabUrl);
-    } else {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      result = await captureAndReport(tab?.id, tab?.url);
-    }
-    return result;
+  async CAPTURE() {
+    return captureActive();
   },
 
   async REMOVE({ key }) {

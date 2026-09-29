@@ -43,20 +43,40 @@ if (!existsSync(join(root, sw || ''))) fail(`background.service_worker missing: 
 // ------------------------------------------------- permission expectations
 
 const perms = manifest.permissions || [];
-const EXPECTED = ['storage', 'scripting', 'activeTab', 'sidePanel'];
+const EXPECTED = ['storage', 'scripting', 'sidePanel'];
 for (const p of EXPECTED) if (!perms.includes(p)) fail(`expected permission missing: ${p}`);
 
 const EXTRA = perms.filter((p) => !EXPECTED.includes(p));
 if (EXTRA.length) notes.push(`extra permissions present (review may question these): ${EXTRA.join(', ')}`);
 
-// The whole point of using activeTab is not asking for blanket host access.
-if (manifest.host_permissions?.length) {
-  fail(`host_permissions should be empty, found: ${manifest.host_permissions.join(', ')}`);
+/**
+ * Host access must be scoped to Alibaba and nothing else.
+ *
+ * activeTab alone turned out not to be enough: a one-shot grant from the
+ * toolbar click does not survive a navigation, so the in-panel Re-scan button
+ * could not read the tab URL and could not inject into the page at all. That
+ * made the most-used control silently broken on exactly the pages the tool
+ * exists for. A host permission is the honest fix; a blanket one is not.
+ */
+const hosts = manifest.host_permissions || [];
+if (hosts.length === 0) {
+  fail('no host_permissions: Re-scan cannot read the tab URL or inject after a navigation');
 }
-if (manifest.optional_host_permissions?.length) {
-  notes.push(`optional_host_permissions present: ${manifest.optional_host_permissions.join(', ')}`);
+const ALIBABA_HOST = /^(\*|https?):\/\/(\*\.)?alibaba\.com\/\*$/;
+for (const h of hosts) {
+  if (!ALIBABA_HOST.test(h)) {
+    fail(`host permission is not scoped to alibaba.com: ${h}`);
+  }
 }
-for (const p of ['tabs', 'webRequest', 'declarativeNetRequest', 'cookies', '<all_urls>']) {
+if (hosts.includes('<all_urls>') || hosts.includes('*://*/*')) {
+  fail('host permissions must never be wildcard-wide');
+}
+
+// "tabs" would let the extension read the URL of every site the user visits.
+if (perms.includes('tabs')) {
+  fail('permission "tabs" is not needed once host_permissions is scoped to alibaba.com');
+}
+for (const p of ['webRequest', 'declarativeNetRequest', 'cookies', 'history', 'bookmarks']) {
   if (perms.includes(p)) fail(`permission "${p}" is broad and should not be requested: ${p}`);
 }
 
@@ -140,7 +160,7 @@ for (const size of [16, 32, 48, 128]) {
 // ------------------------------------------------------------------ report
 
 console.log('manifest   : v%s, permissions [%s]', manifest.manifest_version, perms.join(', '));
-console.log('host access: none (activeTab only)');
+console.log('host access: %s', hosts.join(', ') || 'none');
 for (const n of notes) console.log('note       :', n);
 if (problems.length) {
   console.log('\nPROBLEMS');

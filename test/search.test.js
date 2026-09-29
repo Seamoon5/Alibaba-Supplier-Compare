@@ -96,6 +96,18 @@ const withDom = (nodes, url, fn) => {
 
 // ------------------------------------------------------------ URL routing
 
+test('the real supplier search URL from a live page is routed to the search extractor', () => {
+  // Regression: a one-shot activeTab grant from the toolbar click does not
+  // survive a navigation, so Re-scan could not read this URL, fell through to
+  // "unknown", and reported "Not a product page" on a search results page.
+  const LIVE = 'https://www.alibaba.com/search/page?spm=a2700.prosearch.taTop.2.1e1467afC310FV' +
+    '&SearchScene=suppliers&pro=true&SearchText=man+shirt&from=pcDetailHeader';
+  assert.equal(classifyUrl(LIVE), 'search');
+
+  const HOME = 'https://offer.alibaba.com/cps/dngh1l8c7bm-cps';
+  assert.equal(classifyUrl(HOME), 'home');
+});
+
 test('classifyUrl separates the pages that need different handling', () => {
   assert.equal(classifyUrl('https://www.alibaba.com/product-detail/_1601918386232.html'), 'product');
   assert.equal(classifyUrl('https://www.alibaba.com/product-detail/_123.html?spm=a'), 'product');

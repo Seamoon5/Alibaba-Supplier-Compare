@@ -13,7 +13,6 @@ const K_RECORDS = `${NS}:records`;
 const K_SETTINGS = `${NS}:settings`;
 const K_DIAG = `${NS}:diagnostics`;
 const K_LAST_CAPTURE = `${NS}:lastCapture`;
-const K_LAST_TAB = `${NS}:lastTab`;
 
 export const DEFAULT_SETTINGS = {
   targetQty: 1,
@@ -215,21 +214,4 @@ export async function clearLastCapture() {
   await removeKey(K_LAST_CAPTURE);
 }
 
-/**
- * The last tab URL we legitimately had access to.
- *
- * Kept because the extension asks for activeTab, not the broad "tabs"
- * permission. Storing it is not a privacy expansion: the value is only ever a
- * page the user themselves pointed the extension at.
- */
-export async function saveLastTab(entry) {
-  const value = { url: entry?.url || '', at: entry?.at || Date.now() };
-  await writeKey(K_LAST_TAB, value);
-  return value;
-}
-
-export async function getLastTab() {
-  return (await readKey(K_LAST_TAB)) || null;
-}
-
-export const KEYS = { K_RECORDS, K_SETTINGS, K_DIAG, K_LAST_CAPTURE, K_LAST_TAB };
+export const KEYS = { K_RECORDS, K_SETTINGS, K_DIAG, K_LAST_CAPTURE };

@@ -109,12 +109,7 @@ async function refreshContext() {
     return;
   }
   if (!res || res.ok === false) return;
-  tabContext = {
-    kind: res.kind || 'unknown',
-    url: res.url || '',
-    live: res.live !== false,
-    seenAt: res.seenAt || Date.now(),
-  };
+  tabContext = { kind: res.kind || 'unknown', url: res.url || '' };
   if (res.pendingResult) captureResultUi(res.pendingResult);
 }
 
@@ -205,11 +200,7 @@ function renderEmpty() {
 
   $('ctxNote').hidden = tabContext.kind === 'product';
   if (tabContext.kind !== 'product') {
-    // When the URL came from the cache rather than a live read, say so. A stale
-    // guess presented as a fact is how a tool teaches its user to distrust it.
-    const prefix = tabContext.live ? 'Currently on: ' : 'Last seen on: ';
-    $('ctxNote').textContent = `${prefix}${shortUrl(tabContext.url)}`;
-    $('ctxNote').title = tabContext.live ? '' : 'The extension cannot read the current tab URL without the "tabs" permission, so this is the last page it was pointed at.';
+    $('ctxNote').textContent = `Currently on: ${shortUrl(tabContext.url)}`;
   }
 
   // The four-step list only helps when the extension is being set up; once the
@@ -219,6 +210,7 @@ function renderEmpty() {
 
 function shortUrl(url) {
   if (!url) return 'no page detected';
+  if (url === 'chrome://extensions/') return 'the extensions page';
   try {
     const u = new URL(url);
     const tail = u.pathname === '/' ? '' : u.pathname.replace(/\/+$/, '');
