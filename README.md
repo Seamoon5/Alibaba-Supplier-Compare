@@ -21,17 +21,22 @@ rest by real cost.
 
 ## Features
 
-- **One-click capture.** Press the toolbar button on any Alibaba product page. The side panel opens
+- **One-click capture.** Press the toolbar button on an Alibaba product page. The side panel opens
   and the product is added.
+- **Add a whole results page at once.** On an Alibaba search or supplier-directory page, one press
+  adds every supplier currently on screen — name, MOQ, years, verified status, response time,
+  on-time delivery, reorder rate and revenue. You do not have to click into 20 product pages first.
 - **Transposed comparison matrix.** Suppliers are columns, fields are rows, so three or more
   suppliers read side by side in the panel without horizontal scrolling.
 - **Real unit-price math.** A target-quantity field drives every price: the correct tier is
   selected, order totals are computed, and below-MOQ suppliers are flagged rather than quietly
   mispriced.
 - **Supplier trust signals.** Verified Supplier, Trade Assurance, years on platform, business type
-  (factory vs trading company), response rate, lead time.
+  (factory vs trading company), response time, on-time delivery, reorder rate, online revenue.
 - **Honest data quality.** Every field records which extraction layer read it, and the panel shows
   "not shown" when a page simply does not publish something — it never guesses a `No`.
+- **Unpriced suppliers are kept.** A supplier card with no published price is shown with its MOQ and
+  credentials, and excluded from ranking rather than hidden.
 - **Export to Sheets** (tab-separated, one click, pastes into clean cells), **CSV download**, and a
   **formatted quote summary** for sending to a client or your team.
 - **Currency-safe.** Suppliers quoting in different currencies are ranked in separate groups, never
@@ -51,24 +56,34 @@ Requires **Chrome 116 or newer** (for the side panel and `sidePanel.open`).
 
 ### Using it
 
-1. Open an Alibaba **product** page — a URL containing `/product-detail/`.
-2. Press the **Alibaba Supplier Compare** toolbar button. The side panel opens and the product is
-   added to your comparison.
-3. Repeat for each supplier you are considering.
-4. Set **Target qty** at the top. The price row re-sorts instantly to the true unit cost at that
-   quantity.
-5. **Copy for Sheets** to paste the table into a spreadsheet, or **Quote summary** to send a clean
+1. **On a search or supplier-directory page** (e.g. `alibaba.com/search/page?SearchScene=suppliers`):
+   press the toolbar button once to add every supplier shown on the page. Scroll so the results are
+   on screen first — Alibaba replaces the list as you scroll.
+2. **On a product page** (a URL containing `/product-detail/`): press the toolbar button to add that
+   product with its full tiered price ladder. Repeat for each product you are comparing.
+3. Set **Target qty** at the top. The price row re-sorts instantly to the true unit cost at that
+   quantity, and anything whose MOQ is above it is flagged.
+4. **Copy for Sheets** to paste the table into a spreadsheet, or **Quote summary** to send a clean
    comparison to a client.
+
+The panel tells you which of these applies to the page you are actually on, so it never sits there
+looking idle.
 
 ## How the extraction works
 
-Alibaba does not put product data in clean HTML. It ships a large JSON object in the page source
-(commonly `window.detailData`). A normal content script cannot read it, because Chrome isolates
-extension scripts from page scripts. The extension therefore injects a single function with
-`chrome.scripting.executeScript({ world: 'MAIN' })`, which can read the page's own variables.
+Alibaba does not put product data in clean HTML. On product pages it ships a large JSON object in
+the page source (commonly `window.detailData`). A normal content script cannot read it, because
+Chrome isolates extension scripts from page scripts. The extension therefore injects a single
+function with `chrome.scripting.executeScript({ world: 'MAIN' })`, which can read the page's own
+variables.
 
-The reader is deliberately built in four fallback layers, so a layout change on Alibaba's side
-degrades gracefully instead of breaking:
+Results pages are different: the cards are built from the DOM and there is no single stable JSON
+blob, so the results extractor anchors on the product links each card contains, walks up to the
+card that owns the link, and label-scans the text. That survives class-name churn better than a
+fixed selector list, and it means one card holding five products is one supplier, not five.
+
+The product reader is built in four fallback layers, so a layout change on Alibaba's side degrades
+gracefully instead of breaking:
 
 | Layer | Method | Reliability |
 |---|---|---|
@@ -105,23 +120,29 @@ If a field stops appearing, an update to Alibaba's markup is the likely cause.
 ## Development
 
 ```bash
-npm test        # 68 unit tests: comparison math, all four extraction layers, exports
+npm test        # 82 unit tests: comparison math, both extractors, all four layers, exports
 npm run icons   # regenerate the PNG icons (pure Python, no dependencies)
 npm run preview # render the side panel in a real browser and screenshot every state
+npm run verify  # pre-flight checks: manifest, icons, module graph, no remote code
 ```
 
-The comparison math, the four-layer extractor, and the brace-balanced JSON reader are all covered by
-unit tests, including the edge cases that produce a wrong "winner" if they regress — tier
-boundaries, below-MOQ pricing, mixed currencies, and booleans that are absent rather than false.
+The comparison math, both extractors, the four-layer reader and the brace-balanced JSON reader are
+all covered by unit tests, including the edge cases that produce a wrong "winner" if they regress —
+tier boundaries, below-MOQ pricing, mixed currencies, booleans that are absent rather than false,
+and suppliers that have no price at all.
 
-To load the panel standalone (useful while styling), run the preview script, which serves the
-project and screenshots the empty state, the matrix, filters, the verification-screen state, and a
-narrow and wide viewport.
+`npm run preview` serves the project and renders the panel in real Chromium, asserting layout
+facts rather than just taking pictures: the matrix and the empty state, search and home page
+contexts, the verification-screen state, a supplier-origin matrix, and narrow and wide viewports.
 
 ## Privacy
 
 Everything stays on your computer in `chrome.storage.local`. No server, no account, no analytics,
 no network requests. See [PRIVACY.md](PRIVACY.md).
+
+The extension does **not** request the `tabs` permission, so it cannot read the URL of a tab the
+user has not pointed it at. That is why the panel sometimes says "Last seen on: …" rather than
+"Currently on: …" — it is telling you the page is from memory, not read live.
 
 ## Permissions, and why each is needed
 
@@ -141,12 +162,13 @@ PRIVACY.md
 src/
   background.js              service worker: capture, storage, export
   extract/
-    harvest.js               MAIN-world reader (runs inside the page)
+    harvest.js               MAIN-world product-page reader (runs inside the page)
+    search.js                MAIN-world results-page reader
     normalize.js             four-layer field mapping + provenance
   lib/
     schema.js                record shape, normalisation, confidence
     compare.js               target-quantity math, ranking (pure)
-    probe.js                 page classification, CAPTCHA detection
+    probe.js                 page classification, CAPTCHA detection, URL routing
     store.js                 local persistence
     exporters/               tsv.js, clientSummary.js, index.js
   panel/                     side panel UI (html/css/js)
@@ -154,7 +176,8 @@ tools/
   make_icon.py               pure-Python icon generator (no dependencies)
   diagnostics.html           offline extractor test harness
   panel-preview.mjs          render + screenshot the panel
-test/                        68 unit tests
+  verify.mjs                 pre-flight / store-readiness checks
+test/                        82 unit tests
 docs/screenshots/            panel states
 ```
 

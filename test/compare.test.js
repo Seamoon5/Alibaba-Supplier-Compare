@@ -13,6 +13,7 @@ import {
   isManufacturer, tierShape, formatPrice, round2,
 } from '../src/lib/compare.js';
 import { makeRecord } from '../src/lib/schema.js';
+import { getExporter } from '../src/lib/exporters/index.js';
 
 const supplier = (over = {}) =>
   makeRecord({
@@ -203,6 +204,45 @@ test('hideLowConfidence drops records with a missing core field', () => {
 });
 
 // -------------------------------------------------------------- price shape
+
+test('a supplier with no price is shown, not treated as filtered out', () => {
+  // Regression: an unpriced supplier was lumped in with rows removed by user
+  // filters, so the panel said "1 supplier is hidden by the current filters"
+  // when no filter was on. On a supplier search an absent price is normal.
+  const priced = supplier({ id: 'a', company: 'Priced', moq: 1 });
+  const unpriced = makeRecord({
+    productId: 'b', companyName: 'Unpriced', currency: 'USD',
+    moqQty: 100, priceTiers: [],
+  });
+
+  const res = rank([priced, unpriced], 2);
+  assert.equal(res.totalShown, 1, 'only the priced one is ranked');
+  assert.equal(res.unpriced.length, 1, 'the unpriced one is reported separately');
+  assert.equal(res.unpriced[0].record.companyName, 'Unpriced');
+  assert.equal(res.filtered.length, 0, 'no filter was active, so nothing is "filtered"');
+  assert.equal(res.unpriced[0].record.moqQty, 100, 'its MOQ is still available to show');
+});
+
+test('genuinely filtered rows are reported as filtered', () => {
+  const list = [
+    supplier({ id: 'a', company: 'Factory', businessType: 'Manufacturer', moq: 1 }),
+    supplier({ id: 'b', company: 'Trader', businessType: 'Trading Co., Ltd.', moq: 1 }),
+  ];
+  const res = rank(list, 1, { manufacturersOnly: true });
+  assert.equal(res.filtered.length, 1);
+  assert.equal(res.filtered[0].record.companyName, 'Trader');
+  assert.equal(res.unpriced.length, 0);
+});
+
+test('the exporter still lists unpriced suppliers', () => {
+  // They must reach a spreadsheet: MOQ, years and credentials are the point of
+  // a supplier comparison even when the page shows no price.
+  const list = [supplier({ id: 'a', company: 'Priced', moq: 1 }),
+    makeRecord({ productId: 'b', companyName: 'Unpriced', currency: 'USD', moqQty: 100, priceTiers: [] })];
+  const out = getExporter('tsv').build(list, { targetQty: 2 });
+  assert.ok(out.includes('Unpriced'));
+  assert.equal(out.split('\n').length, 3);
+});
 
 test('tierShape normalises a ladder for plotting', () => {
   const shape = tierShape(

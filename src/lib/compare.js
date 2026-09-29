@@ -103,14 +103,27 @@ export function rank(records, targetQty, filters = {}) {
 
   const resolved = records.map((r) => resolveSupplier(r, targetQty));
 
-  const kept = resolved.filter((r) => {
-    if (!r.ok) return false;
-    if (hideBelowMoq && r.belowMoq) return false;
-    if (verifiedOnly && r.record.verifiedSupplier !== true) return false;
-    if (manufacturersOnly && !isManufacturer(r.record.businessType)) return false;
-    if (hideLowConfidence && r.record.confidence === 'low') return false;
-    return true;
-  });
+  // Three outcomes, kept distinct. A supplier with no published price is a
+  // normal thing to find on a supplier search, and lumping it in with "hidden
+  // by your filters" both hides useful rows and tells the user a lie.
+  const unpriced = [];
+  const filtered = [];
+
+  const kept = [];
+  for (const r of resolved) {
+    if (!r.ok) {
+      unpriced.push(r);
+      continue;
+    }
+    if ((hideBelowMoq && r.belowMoq) ||
+        (verifiedOnly && r.record.verifiedSupplier !== true) ||
+        (manufacturersOnly && !isManufacturer(r.record.businessType)) ||
+        (hideLowConfidence && r.record.confidence === 'low')) {
+      filtered.push(r);
+      continue;
+    }
+    kept.push(r);
+  }
 
   const byCurrency = new Map();
   for (const r of kept) {
@@ -147,6 +160,8 @@ export function rank(records, targetQty, filters = {}) {
     multipleCurrencies: groups.length > 1,
     totalConsidered: resolved.length,
     totalShown: kept.length,
+    unpriced,
+    filtered,
   };
 }
 

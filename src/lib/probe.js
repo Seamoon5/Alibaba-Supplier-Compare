@@ -63,3 +63,85 @@ export const PAGE_MESSAGES = {
       'Supplier showroom and search pages are not supported in this version.',
   },
 };
+
+// ------------------------------------------------------------------ URL shape
+
+/**
+ * Work out what kind of Alibaba page the user is on, from the URL alone.
+ *
+ * This exists because the most common way for the extension to appear to do
+ * "nothing" is being used on the homepage or a search results page, where there
+ * is legitimately nothing to capture. Saying so plainly beats silence.
+ *
+ * @returns {'product'|'search'|'home'|'offsite'|'unknown'}
+ */
+export function classifyUrl(url = '') {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return 'unknown';
+  }
+  if (!/(^|\.)alibaba\.com$/i.test(parsed.hostname)) return 'offsite';
+
+  const path = parsed.pathname;
+  if (/\/product-detail\//i.test(path)) return 'product';
+  if (/\/showproduct\.html/i.test(path)) return 'product';
+
+  // /cps/... is Alibaba's landing-page campaign route, not a results list, so
+  // it must be excluded before the search checks or the home page looks like
+  // a page of results that does not exist.
+  const isLanding = /^\/cps\//i.test(path);
+
+  if (!isLanding) {
+    if (/^\/(trade\/)?search\b/i.test(path)) return 'search';
+    if (/[?&](SearchText|SearchScene)=/i.test(url)) return 'search';
+    if (/^\/(companies?|suppliers?)\//i.test(path)) return 'search';
+  }
+
+  if (path === '/' || path === '' || isLanding) return 'home';
+  return 'unknown';
+}
+
+/**
+ * A short, concrete next step for each page kind.
+ *
+ * These must agree with the panel's own empty-state copy (CONTEXT_COPY in
+ * panel.js). When the two disagreed, the banner told the user search results
+ * were unsupported while the button underneath was about to add them.
+ */
+export const URL_HINTS = {
+  home: {
+    tone: 'warn',
+    title: 'This is the Alibaba home page',
+    body:
+      'There is nothing to add from the home page itself. Search for what you need, then ' +
+      'press this button again — it will add every result on the results page at once.',
+  },
+  search: {
+    tone: 'warn',
+    title: 'Ready to add everyone on this page',
+    body:
+      'Press Re-scan to add every supplier shown on this results page at once. For tiered ' +
+      'prices and a price ladder, open an individual product page and press it again there.',
+  },
+  offsite: {
+    tone: 'warn',
+    title: 'Not an Alibaba page',
+    body: 'Open a product or search page on alibaba.com, then press this button again.',
+  },
+  unknown: {
+    tone: 'warn',
+    title: 'Not a product page',
+    body:
+      'Open an Alibaba product page (a URL containing /product-detail/) or a results page, ' +
+      'then try again.',
+  },
+};
+
+/** The message to show for a URL that cannot be captured. */
+export function messageForUrl(url = '') {
+  const kind = classifyUrl(url);
+  if (kind === 'product') return null;
+  return { ...URL_HINTS[kind], kind };
+}

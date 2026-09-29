@@ -104,6 +104,34 @@ const RECORDS = [
 
 const SETTINGS = { targetQty: 2 };
 
+/** Rows as a Suppliers results page produces them: no price ladder. */
+const SEARCH_RECORDS = [
+  {
+    productId: 'aaryan', title: 'Plus Size Mens T-Shirts', sourceUrl: 'https://www.alibaba.com/product-detail/_1600000000000.html',
+    companyName: 'AARYAN SOURCING', country: 'BD', yearsOnPlatform: 9, verifiedSupplier: true,
+    tradeAssurance: false, businessType: '', currency: '', moqQty: 1000, moqUnit: 'pieces',
+    onTimeDelivery: 95, reorderRate: 42, responseRate: '1h', onlineRevenue: '$50K - $100K',
+    confidence: 'high', missing: [], origin: 'search', capturedAt: new Date().toISOString(),
+    provenance: {}, priceTiers: [],
+  },
+  {
+    productId: 'guangzhou', title: 'School Uniform Shirts', sourceUrl: 'https://www.alibaba.com/product-detail/_1600000000001.html',
+    companyName: 'Guangzhou Smart Mfg', country: 'CN', yearsOnPlatform: 7, verifiedSupplier: true,
+    tradeAssurance: true, businessType: 'Manufacturer', currency: 'USD', moqQty: 200, moqUnit: 'pieces',
+    onTimeDelivery: 92, reorderRate: 55, responseRate: '2h', onlineRevenue: '',
+    confidence: 'high', missing: [], origin: 'search', capturedAt: new Date().toISOString(),
+    provenance: {}, priceTiers: [{ minQty: 1, maxQty: null, unitPrice: 12.5 }],
+  },
+  {
+    productId: 'ningbo', title: 'Oxford Dress Shirt', sourceUrl: 'https://www.alibaba.com/product-detail/_1600000000002.html',
+    companyName: 'Ningbo Textile Group', country: 'CN', yearsOnPlatform: 15, verifiedSupplier: false,
+    tradeAssurance: false, businessType: 'Manufacturer', currency: 'USD', moqQty: 500, moqUnit: 'pieces',
+    onTimeDelivery: 88, reorderRate: 31, responseRate: '4h', onlineRevenue: '$100K - $500K',
+    confidence: 'high', missing: [], origin: 'search', capturedAt: new Date().toISOString(),
+    provenance: {}, priceTiers: [{ minQty: 1, maxQty: null, unitPrice: 9.8 }],
+  },
+];
+
 /** Minimal chrome.* stub: enough storage and messaging for the panel. */
 const chromeMock = (records, settings) => `
   const RECORDS = ${JSON.stringify(records)};
@@ -115,6 +143,22 @@ const chromeMock = (records, settings) => `
       lastError: null,
       sendMessage(msg, cb) {
         const reply = (m) => setTimeout(() => cb && cb(m), 0);
+        if (msg.type === 'GET_TAB_CONTEXT') {
+          // Same rules as src/lib/probe.js classifyUrl, kept inline so the
+          // harness can run outside the extension.
+          const u = String(globalThis.__tabUrl || '');
+          let kind = 'unknown';
+          try {
+            const parsed = new URL(u);
+            const path = parsed.pathname;
+            const landing = /^\\/cps\\//i.test(path);
+            if (!/(^|\\.)alibaba\\.com$/i.test(parsed.hostname)) kind = 'offsite';
+            else if (/\\/product-detail\\//i.test(path) || /showproduct\\.html/i.test(path)) kind = 'product';
+            else if (!landing && (/^\\/(trade\\/)?search\\b/i.test(path) || /[?&](SearchText|SearchScene)=/i.test(u) || /^\\/(companies?|suppliers?)\\//i.test(path))) kind = 'search';
+            else if (path === '/' || path === '' || landing) kind = 'home';
+          } catch {}
+          return reply({ ok: true, url: u, kind, live: true, seenAt: Date.now(), pendingResult: globalThis.__pending || null });
+        }
         if (msg.type === 'GET_STATE') return reply({ ok: true, records: RECORDS, settings: SETTINGS });
         if (msg.type === 'SET_SETTINGS') { Object.assign(SETTINGS, msg.patch); return reply({ ok: true, settings: SETTINGS }); }
         if (msg.type === 'GET_DIAGNOSTICS') {
@@ -137,11 +181,19 @@ const chromeMock = (records, settings) => `
 `;
 
 /** Scenarios rendered as separate screenshots. */
+const PRODUCT_URL = 'https://www.alibaba.com/product-detail/_1601918386232.html';
+const SEARCH_URL = 'https://www.alibaba.com/search/page?SearchScene=suppliers&SearchText=man+shirt';
+const HOME_URL = 'https://offer.alibaba.com/cps/dngh1l8c7bm-cps';
+const OFFSITE_URL = 'https://www.google.com/search?q=supplier';
+
 const SCENARIOS = [
   { name: '01-matrix-2qty', width: 420, height: 900, records: RECORDS, settings: SETTINGS, expectVisible: 3 },
   { name: '02-matrix-narrow', width: 320, height: 900, records: RECORDS, settings: SETTINGS, expectVisible: 2 },
   { name: '03-matrix-wide', width: 900, height: 700, records: RECORDS, settings: { targetQty: 5 }, expectVisible: 3 },
-  { name: '04-empty', width: 420, height: 900, records: [], settings: SETTINGS },
+  { name: '03b-matrix-search-origin', width: 420, height: 900, records: SEARCH_RECORDS, settings: SETTINGS, expectVisible: 3 },
+  { name: '04-empty-unknown', width: 420, height: 900, records: [], settings: SETTINGS, tabUrl: OFFSITE_URL },
+  { name: '04b-empty-search', width: 420, height: 900, records: [], settings: SETTINGS, tabUrl: SEARCH_URL },
+  { name: '04c-empty-home', width: 420, height: 900, records: [], settings: SETTINGS, tabUrl: HOME_URL },
   {
     name: '05-punish-banner', width: 420, height: 520, records: RECORDS, settings: SETTINGS, expectVisible: 3,
     banner: { tone: 'danger', icon: '×', title: 'Alibaba is showing a verification screen',
@@ -166,7 +218,11 @@ for (const s of SCENARIOS) {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
 
-  await page.addInitScript(chromeMock(s.records, s.settings));
+  // Passed as source text: addInitScript serialises functions, and the mock
+  // closes over Node-side values that do not exist in the page.
+  await page.addInitScript({
+    content: `globalThis.__tabUrl = ${JSON.stringify(s.tabUrl || PRODUCT_URL)};\n${chromeMock(s.records, s.settings)}`,
+  });
   await page.goto(panelUrl, { waitUntil: 'load' });
   await page.waitForTimeout(250);
 
@@ -216,6 +272,12 @@ for (const s of SCENARIOS) {
       workingLinks: links.length,
       escapedHtmlLeak: document.body.textContent.includes('<a class='),
       firstPrice: priceCell ? priceCell.textContent.trim() : null,
+      emptyTitle: document.getElementById('emptyTitle').textContent.trim(),
+      emptyText: document.getElementById('emptyText').textContent.trim(),
+      ctxAction: document.getElementById('ctxAction').hidden ? null
+        : document.getElementById('ctxAction').textContent.trim(),
+      ctxNote: document.getElementById('ctxNote').hidden ? null
+        : document.getElementById('ctxNote').textContent.trim(),
       note: document.getElementById('fxNote').hidden
         ? null : document.getElementById('fxNote').textContent.trim(),
       rowLabels: [...document.querySelectorAll('.matrix tbody th')].map((t) => t.textContent.trim()),
@@ -236,6 +298,10 @@ for (const s of SCENARIOS) {
   if (facts.escapedHtmlLeak) problems.push(`${s.name}: escaped HTML leaked into the page as text`);
   if (s.records.length === 0) {
     if (!facts.emptyVisible) problems.push(`${s.name}: empty state not shown`);
+    if (facts.ctxAction === null && s.tabUrl !== OFFSITE_URL) {
+      problems.push(`${s.name}: no action offered on ${s.tabUrl}`);
+    }
+    console.log('   empty      :', JSON.stringify(facts.emptyTitle), '|', facts.ctxAction, '|', facts.ctxNote);
   } else {
     if (!facts.matrixVisible) problems.push(`${s.name}: matrix not shown`);
     if (!facts.footerVisible) problems.push(`${s.name}: footer not shown`);

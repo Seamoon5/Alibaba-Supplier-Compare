@@ -63,12 +63,14 @@
   <div class="empty-mark" aria-hidden="true">
     <svg viewBox="0 0 48 48"><rect x="6" y="10" width="10" height="28" rx="2"/><rect x="19" y="10" width="10" height="28" rx="2"/><rect x="32" y="10" width="10" height="28" rx="2"/></svg>
   </div>
-  <h1 class="empty-title">Compare suppliers, not tabs</h1>
-  <p class="empty-text">
+  <h1 class="empty-title" id="emptyTitle">Compare suppliers, not tabs</h1>
+  <p class="empty-text" id="emptyText">
     Open an Alibaba product page, then press the toolbar button. Its prices, MOQ and
     credentials are added to a matrix you can read at a glance.
   </p>
-  <ol class="steps">
+  <button class="btn btn-primary btn-wide" id="ctxAction" hidden></button>
+  <p class="ctx-note" id="ctxNote" hidden></p>
+  <ol class="steps" id="emptySteps">
     <li>Open a product page on <strong>alibaba.com</strong></li>
     <li>Press the <strong>Alibaba Supplier Compare</strong> toolbar button</li>
     <li>Repeat for each supplier you are considering</li>

@@ -48,6 +48,31 @@ let records = [];
 let settings = { targetQty: 1 };
 let busy = false;
 let toastTimer = null;
+let tabContext = { kind: 'unknown', url: '' };
+
+/** What the empty state should say, given the page the user is actually on. */
+const CONTEXT_COPY = {
+  home: {
+    title: 'Start with a search',
+    text: 'You are on the Alibaba home page. Search for what you need, then come back here and press the button again — this will add every result on the page at once.',
+  },
+  search: {
+    title: 'Add everyone on this page',
+    text: 'This is a results page. Press the button to add every supplier shown here at once, then open an individual product page to add its tiered prices.',
+  },
+  product: {
+    title: 'Compare suppliers, not tabs',
+    text: 'This page looks like a product page. Press the button to add it, then repeat for each supplier you are considering.',
+  },
+  offsite: {
+    title: 'Open an Alibaba page first',
+    text: 'This tab is not on alibaba.com. Switch to an Alibaba product or search page and press the button again.',
+  },
+  unknown: {
+    title: 'Compare suppliers, not tabs',
+    text: 'Open an Alibaba product page, then press the toolbar button. Its prices, MOQ and credentials are added to a matrix you can read at a glance.',
+  },
+};
 
 // ---------------------------------------------------------------- messaging
 
@@ -67,8 +92,30 @@ async function loadState() {
   const res = await send('GET_STATE');
   records = res.records || [];
   settings = res.settings || { targetQty: 1 };
+  await refreshContext();
   syncControls();
   render();
+}
+
+/**
+ * Ask the worker what the current tab is, and pick up any capture result that
+ * was produced while this panel was still loading.
+ */
+async function refreshContext() {
+  let res;
+  try {
+    res = await send('GET_TAB_CONTEXT');
+  } catch {
+    return;
+  }
+  if (!res || res.ok === false) return;
+  tabContext = {
+    kind: res.kind || 'unknown',
+    url: res.url || '',
+    live: res.live !== false,
+    seenAt: res.seenAt || Date.now(),
+  };
+  if (res.pendingResult) captureResultUi(res.pendingResult);
 }
 
 // ------------------------------------------------------------------- chrome
@@ -116,7 +163,7 @@ async function capture() {
   el.scanning.hidden = true;
   busy = false;
 
-  if (res.ok === false && res.error) {
+  if (res?.ok === false && res.error) {
     showBanner({
       tone: 'danger', icon: '×',
       title: 'Something went wrong',
@@ -125,30 +172,7 @@ async function capture() {
     return;
   }
 
-  const result = res.result || res;
-  if (result?.ok) {
-    await loadState();
-    const r = result.record;
-    const bits = [];
-    if (r.companyName) bits.push(r.companyName);
-    if (r.priceTiers?.length) bits.push(`${r.priceTiers.length} price tier${r.priceTiers.length > 1 ? 's' : ''}`);
-    showBanner({
-      tone: 'best', icon: '✓',
-      title: result.action === 'updated' ? 'Product updated' : 'Product added',
-      text: bits.join(' · ') || 'Saved to the comparison.',
-    });
-    return;
-  }
-
-  if (result?.message) {
-    showBanner({
-      tone: result.message.tone || 'warn',
-      icon: result.state === 'punish' || result.state === 'block' ? '×' : '!',
-      title: result.message.title,
-      text: result.message.body,
-      action: { label: 'Re-scan' },
-    });
-  }
+  await captureResultUi(res?.result || res);
 }
 
 // ------------------------------------------------------------------ render
@@ -159,6 +183,50 @@ async function capture() {
  * them.
  */
 const notRead = (r, field) => !r.provenance || r.provenance[field] === 'missing';
+
+/**
+ * The empty state is the first thing anyone sees, so it has to answer the
+ * question the user is actually asking: "what do I press, and will it work on
+ * the page I'm looking at?" It reads the current tab and says so.
+ */
+function renderEmpty() {
+  const copy = CONTEXT_COPY[tabContext.kind] || CONTEXT_COPY.unknown;
+  $('emptyTitle').textContent = copy.title;
+  $('emptyText').textContent = copy.text;
+
+  const addable = tabContext.kind === 'product' || tabContext.kind === 'search' || tabContext.kind === 'home';
+  const action = $('ctxAction');
+  action.hidden = !addable;
+  if (addable) {
+    action.textContent = tabContext.kind === 'product'
+      ? 'Add this product'
+      : 'Add every result on this page';
+  }
+
+  $('ctxNote').hidden = tabContext.kind === 'product';
+  if (tabContext.kind !== 'product') {
+    // When the URL came from the cache rather than a live read, say so. A stale
+    // guess presented as a fact is how a tool teaches its user to distrust it.
+    const prefix = tabContext.live ? 'Currently on: ' : 'Last seen on: ';
+    $('ctxNote').textContent = `${prefix}${shortUrl(tabContext.url)}`;
+    $('ctxNote').title = tabContext.live ? '' : 'The extension cannot read the current tab URL without the "tabs" permission, so this is the last page it was pointed at.';
+  }
+
+  // The four-step list only helps when the extension is being set up; once the
+  // user is on a real page it is noise competing with the action button.
+  $('emptySteps').hidden = tabContext.kind !== 'unknown' && tabContext.kind !== 'offsite';
+}
+
+function shortUrl(url) {
+  if (!url) return 'no page detected';
+  try {
+    const u = new URL(url);
+    const tail = u.pathname === '/' ? '' : u.pathname.replace(/\/+$/, '');
+    return u.hostname.replace(/^www\./, '') + tail.slice(0, 40);
+  } catch {
+    return url.slice(0, 60);
+  }
+}
 
 /** One row definition for the transposed matrix. */
 function rowDefs() {
@@ -229,6 +297,24 @@ function rowDefs() {
     {
       label: 'Response',
       cell: (_c, r) => (r.responseRate ? html`${r.responseRate}` : html`<span class="muted">—</span>`),
+    },
+    {
+      label: 'On-time',
+      cell: (_c, r) => (Number.isFinite(r.onTimeDelivery)
+        ? html`<span class="val-num">${r.onTimeDelivery}%</span>`
+        : html`<span class="muted">—</span>`),
+    },
+    {
+      label: 'Reorder',
+      cell: (_c, r) => (Number.isFinite(r.reorderRate)
+        ? html`<span class="val-num">${r.reorderRate}%</span>`
+        : html`<span class="muted">—</span>`),
+    },
+    {
+      label: 'Revenue',
+      cell: (_c, r) => (r.onlineRevenue
+        ? html`${r.onlineRevenue}`
+        : html`<span class="muted">—</span>`),
     },
     {
       label: 'Lead time',
@@ -331,6 +417,7 @@ function render() {
 
   if (!hasRecords) {
     el.hdrCount.hidden = true;
+    renderEmpty();
     return;
   }
 
@@ -341,9 +428,10 @@ function render() {
     hideLowConfidence: settings.hideLowConfidence,
   });
 
-  // Header: one column per supplier, best column marked. A boundary is drawn
-  // between currency groups so a "Best" in the second group can never be read
-  // as beating the first group's best.
+  // Ranked columns first, then suppliers with no published price. Unpriced
+  // suppliers still belong in a supplier comparison — MOQ, years and
+  // on-time delivery are the reason to keep them — so they are shown, just not
+  // ranked against anything.
   const cols = [];
   result.groups.forEach((group, groupIndex) => {
     group.rows.forEach((row, i) => {
@@ -357,15 +445,17 @@ function render() {
     });
   });
 
-  // Anything filtered out entirely still needs to be visible, or the user
-  // cannot tell a filter hid it from a failure to extract it.
-  const shown = new Set(cols.map((c) => c.resolved.key));
-  const hidden = records
-    .filter((r) => !shown.has(recordKey(r)))
-    .map((r) => ({ resolved: resolveSupplier(r, settings.targetQty), isBest: false, currency: r.currency, filtered: true }));
+  for (const row of result.unpriced) {
+    cols.push({
+      resolved: row,
+      isBest: false,
+      currency: row.currency,
+      groupStart: false,
+      unpriced: true,
+    });
+  }
 
-  const all = [...cols, ...hidden];
-
+  const all = cols;
   const multi = result.groups.length > 1;
 
   el.matrixHead.innerHTML = `<tr><th class="col-label">Supplier</th>${all
@@ -373,8 +463,8 @@ function render() {
       const r = c.resolved.record;
       const sub = [
         c.currency,
-        c.filtered ? 'filtered out' : null,
-        r.confidence === 'low' ? 'partial data' : null,
+        c.unpriced ? 'no published price' : null,
+        c.resolved.record.confidence === 'low' ? 'partial data' : null,
       ].filter(Boolean).join(' · ');
       const cls = [c.isBest ? 'col-best' : '', c.groupStart && multi ? 'group-start' : '']
         .filter(Boolean).join(' ');
@@ -408,7 +498,7 @@ function render() {
     })
     .join('');
 
-  // Notes: cross-currency and filtering explanations.
+  // Notes: explain anything a user might otherwise read as a bug.
   const notes = [];
   if (result.multipleCurrencies) {
     notes.push(
@@ -416,10 +506,17 @@ function render() {
         .map((g) => g.currency).join(', ')}). Each currency is ranked separately — no cross-currency winner is shown, because that would need a live exchange rate.`,
     );
   }
-  if (hidden.length) {
-    notes.push(`${hidden.length} supplier${hidden.length > 1 ? 's are' : ' is'} hidden by the current filters.`);
+  if (result.unpriced.length) {
+    notes.push(
+      `${result.unpriced.length} supplier${result.unpriced.length > 1 ? 's have' : ' has'} no published price on this page, so ${
+        result.unpriced.length > 1 ? 'they are' : 'it is'
+      } shown but not ranked.`,
+    );
   }
-  if (result.totalShown === 0 && records.length > 0) {
+  if (result.filtered.length) {
+    notes.push(`${result.filtered.length} hidden by the current filters.`);
+  }
+  if (result.totalShown === 0 && result.unpriced.length === 0 && records.length > 0) {
     notes.push('No supplier matches the current quantity and filters.');
   }
   el.fxNote.textContent = notes.join(' ');
@@ -429,6 +526,7 @@ function render() {
 // ------------------------------------------------------------------ actions
 
 el.btnRescan.addEventListener('click', capture);
+$('ctxAction').addEventListener('click', capture);
 
 el.btnSettings.addEventListener('click', () => {
   const open = el.filters.hidden;
@@ -591,25 +689,53 @@ chrome.runtime.onMessage.addListener((message) => {
     settings = message.settings || settings;
     syncControls();
     render();
+  } else if (message?.type === 'TAB_CHANGED') {
+    if (!records.length) refreshContext().then(render);
   }
 });
 
 async function captureResultUi(result) {
   if (result?.ok) {
     await loadState();
-    showBanner({
-      tone: 'best', icon: '✓',
-      title: result.action === 'updated' ? 'Product updated' : 'Product added',
-      text: (result.record?.companyName || 'Saved to the comparison'),
-    });
-  } else if (result?.message) {
+    hideBanner();
+
+    if (result.action === 'added-many') {
+      const n = result.added || 0;
+      const upd = result.updated || 0;
+      const bits = [`${n} added`];
+      if (upd) bits.push(`${upd} refreshed`);
+      showBanner({
+        tone: 'best',
+        icon: '✓',
+        title: n > 0 ? 'Results page added' : 'Already added',
+        text: `${bits.join(', ')} from this ${result.scene === 'suppliers' ? 'supplier' : 'product'} search. Set your quantity above to rank them.`,
+      });
+    } else {
+      const r = result.record || {};
+      const bits = [];
+      if (r.companyName) bits.push(r.companyName);
+      if (r.priceTiers?.length) bits.push(`${r.priceTiers.length} price tier${r.priceTiers.length > 1 ? 's' : ''}`);
+      showBanner({
+        tone: 'best',
+        icon: '✓',
+        title: result.action === 'updated' ? 'Product updated' : 'Product added',
+        text: bits.join(' · ') || 'Saved to the comparison.',
+      });
+    }
+    return;
+  }
+
+  if (result?.message) {
     showBanner({
       tone: result.message.tone || 'warn',
-      icon: result.state === 'punish' ? '×' : '!',
+      icon: result.state === 'punish' || result.state === 'error' ? '×' : '!',
       title: result.message.title,
       text: result.message.body,
-      action: { label: 'Re-scan' },
+      action: { label: result.state === 'no-results' ? 'Try again' : 'Re-scan' },
     });
+    // Reflect the page we just rejected in the empty state, so the panel never
+    // sits there looking idle.
+    if (!records.length) await refreshContext();
   }
 }
 

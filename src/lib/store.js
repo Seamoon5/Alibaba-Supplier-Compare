@@ -12,6 +12,8 @@ const NS = 'asc';
 const K_RECORDS = `${NS}:records`;
 const K_SETTINGS = `${NS}:settings`;
 const K_DIAG = `${NS}:diagnostics`;
+const K_LAST_CAPTURE = `${NS}:lastCapture`;
+const K_LAST_TAB = `${NS}:lastTab`;
 
 export const DEFAULT_SETTINGS = {
   targetQty: 1,
@@ -106,6 +108,36 @@ export async function upsertRecord(record) {
   return { records, action };
 }
 
+/**
+ * Insert or update many records in one pass.
+ *
+ * A results page can hold 20+ cards. Upserting them one at a time would do two
+ * storage reads and a write per card; this reads once and writes once.
+ *
+ * @returns {{records: object[], added: number, updated: number}}
+ */
+export async function upsertRecords(incoming) {
+  const records = await getRecords();
+  const index = new Map(records.map((r, i) => [recordKey(r), i]));
+  let added = 0;
+  let updated = 0;
+
+  for (const record of incoming) {
+    const key = recordKey(record);
+    if (index.has(key)) {
+      records[index.get(key)] = record;
+      updated += 1;
+    } else {
+      index.set(key, records.length);
+      records.push(record);
+      added += 1;
+    }
+  }
+
+  await saveRecords(records);
+  return { records, added, updated };
+}
+
 export async function removeRecord(key) {
   const records = await getRecords();
   const next = records.filter((r) => recordKey(r) !== key);
@@ -158,4 +190,46 @@ export async function getDiagnostics() {
   return (await readKey(K_DIAG)) || null;
 }
 
-export const KEYS = { K_RECORDS, K_SETTINGS, K_DIAG };
+/**
+ * The most recent capture result, stored rather than only broadcast.
+ *
+ * Pressing the toolbar button is what opens the side panel, so the panel
+ * usually finishes loading AFTER the capture has already run. A broadcast-only
+ * design therefore drops the result message exactly when it is needed most,
+ * and the user sees no feedback at all.
+ */
+export async function saveLastCapture(entry) {
+  const value = {
+    at: entry?.at || Date.now(),
+    result: entry?.result || null,
+  };
+  await writeKey(K_LAST_CAPTURE, value);
+  return value;
+}
+
+export async function getLastCapture() {
+  return (await readKey(K_LAST_CAPTURE)) || null;
+}
+
+export async function clearLastCapture() {
+  await removeKey(K_LAST_CAPTURE);
+}
+
+/**
+ * The last tab URL we legitimately had access to.
+ *
+ * Kept because the extension asks for activeTab, not the broad "tabs"
+ * permission. Storing it is not a privacy expansion: the value is only ever a
+ * page the user themselves pointed the extension at.
+ */
+export async function saveLastTab(entry) {
+  const value = { url: entry?.url || '', at: entry?.at || Date.now() };
+  await writeKey(K_LAST_TAB, value);
+  return value;
+}
+
+export async function getLastTab() {
+  return (await readKey(K_LAST_TAB)) || null;
+}
+
+export const KEYS = { K_RECORDS, K_SETTINGS, K_DIAG, K_LAST_CAPTURE, K_LAST_TAB };

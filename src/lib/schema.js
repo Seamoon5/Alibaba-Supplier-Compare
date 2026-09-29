@@ -20,11 +20,18 @@ export const PROVENANCE = {
 /** Fields whose absence makes a record untrustworthy. */
 export const CORE_FIELDS = ['title', 'priceTiers', 'moqQty', 'companyName'];
 
+/**
+ * Search results carry no tier ladder and often no price at all — a supplier
+ * card is a company profile, not an offer. Demanding a price ladder there would
+ * mark nearly every row "partial" and drown the signal that matters.
+ */
+export const SEARCH_CORE_FIELDS = ['companyName'];
+
 /** Fields we attempt to capture, with display labels used by the panel and exporters. */
 export const FIELD_LABELS = {
   title: 'Product',
   companyName: 'Supplier',
-  unitPrice: `Unit price`,
+  unitPrice: 'Unit price',
   total: 'Total',
   moqQty: 'MOQ',
   moqUnit: 'MOQ unit',
@@ -34,7 +41,10 @@ export const FIELD_LABELS = {
   businessType: 'Business type',
   country: 'Country',
   currency: 'Currency',
-  responseRate: 'Response rate',
+  responseRate: 'Response time',
+  onTimeDelivery: 'On-time delivery',
+  reorderRate: 'Reorder rate',
+  onlineRevenue: 'Online revenue',
   leadTime: 'Lead time',
   tierCount: 'Price tiers',
   capturedAt: 'Captured',
@@ -52,6 +62,14 @@ function toNum(v) {
   if (!m) return null;
   const n = Number(m[0]);
   return Number.isFinite(n) ? n : null;
+}
+
+/** Percentages arrive as numbers or as "95%" strings. Keep a sane 0..100. */
+function pct(v) {
+  const n = toNum(v);
+  if (n === null) return null;
+  if (n < 0 || n > 100) return null;
+  return n;
 }
 
 /** Normalise one price tier into { minQty, maxQty, unitPrice }. maxQty null = open ended. */
@@ -112,7 +130,13 @@ export function makeRecord(input = {}) {
     verifiedSupplier: input.verifiedSupplier === true,
     tradeAssurance: input.tradeAssurance === true,
     responseRate: str(input.responseRate),
+    onTimeDelivery: pct(input.onTimeDelivery),
+    reorderRate: pct(input.reorderRate),
+    onlineRevenue: str(input.onlineRevenue),
     leadTime: str(input.leadTime),
+
+    /** Where this row came from: a product page, or a search results list. */
+    origin: input.origin === 'search' ? 'search' : 'product',
 
     provenance: { ...input.provenance },
     missing: Array.isArray(input.missing) ? input.missing.slice() : [],
@@ -122,7 +146,8 @@ export function makeRecord(input = {}) {
   };
 
   // Re-derive missing list and confidence from the data we actually ended up with.
-  record.missing = CORE_FIELDS.filter((f) => isEmpty(record[f]));
+  const core = record.origin === 'search' ? SEARCH_CORE_FIELDS : CORE_FIELDS;
+  record.missing = core.filter((f) => isEmpty(record[f]));
   if (record.missing.length > 0) record.confidence = 'low';
   if (record.provenance['__lowConfidence'] === 'true') record.confidence = 'low';
 

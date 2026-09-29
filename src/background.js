@@ -14,16 +14,23 @@
  */
 
 import { harvestPage } from './extract/harvest.js';
+import { harvestSearchPage } from './extract/search.js';
 import { normalize } from './extract/normalize.js';
-import { classifyPage, PAGE_MESSAGES } from './lib/probe.js';
+import { classifyPage, PAGE_MESSAGES, classifyUrl, messageForUrl } from './lib/probe.js';
+import { makeRecord } from './lib/schema.js';
 import {
-  getRecords, upsertRecord, removeRecord, clearRecords,
+  getRecords, upsertRecord, upsertRecords, removeRecord, clearRecords,
   getSettings, saveSettings, saveDiagnostics, getDiagnostics,
+  saveLastCapture, getLastCapture, clearLastCapture,
+  saveLastTab, getLastTab,
 } from './lib/store.js';
 import { recordKey } from './lib/schema.js';
 import { getExporter } from './lib/exporters/index.js';
 
 const PRODUCT_URL_RE = /^https?:\/\/([\w-]+\.)?alibaba\.com\/.*(product-detail|showproduct)/i;
+
+/** How long a stored capture result stays relevant to a freshly opened panel. */
+const CAPTURE_TTL_MS = 90_000;
 
 function setBadge(count) {
   try {
@@ -53,6 +60,23 @@ async function broadcast(message) {
  */
 async function captureTab(tabId, tabUrl) {
   const url = tabUrl || '';
+
+  // A non-product page gets a specific explanation. This is the single most
+  // common reason the extension appears to do nothing, so it is never silent.
+  const urlMessage = messageForUrl(url);
+  if (urlMessage) {
+    return {
+      ok: false,
+      state: urlMessage.kind === 'offsite' ? 'not-product' : 'not-product',
+      kind: urlMessage.kind,
+      message: {
+        tone: urlMessage.tone,
+        title: urlMessage.title,
+        body: urlMessage.body,
+      },
+      pageUrl: url,
+    };
+  }
   if (!PRODUCT_URL_RE.test(url)) {
     return {
       ok: false,
@@ -166,6 +190,140 @@ async function captureTab(tabId, tabUrl) {
   };
 }
 
+/**
+ * Capture, then record the result where the panel will certainly find it.
+ *
+ * The naive version broadcast the result and let it go. That loses the message
+ * whenever the panel is still loading, which is the common case: pressing the
+ * toolbar button is what OPENS the panel, so the panel almost always starts up
+ * after the capture has already finished. The user then saw nothing at all.
+ * Persisting the result closes that race from both directions.
+ */
+/**
+ * The most recent tab URL we were allowed to see.
+ *
+ * Reading tab.url requires either the "tabs" permission or an activeTab grant.
+ * This extension asks for activeTab only, so a fresh side panel cannot read the
+ * current tab's URL on its own. Rather than add "tabs" — which would let the
+ * extension see every page the user visits and would contradict the privacy
+ * promise in PRIVACY.md — we remember the URL from the moments we legitimately
+ * had access, and fall back to that. It is flagged as stale so the panel can
+ * say so rather than confidently describing the wrong page.
+ */
+let lastKnownTab = { url: '', at: 0 };
+
+function rememberTab(url) {
+  if (!url) return;
+  lastKnownTab = { url, at: Date.now() };
+  saveLastTab(lastKnownTab).catch(() => {});
+}
+
+async function currentTab() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.url) {
+      rememberTab(tab.url);
+      return { url: tab.url, live: true, at: Date.now() };
+    }
+  } catch {
+    /* fall through to the cache */
+  }
+  return { url: lastKnownTab.url, live: false, at: lastKnownTab.at };
+}
+
+async function captureAndReport(tabId, tabUrl) {
+  rememberTab(tabUrl);
+  const kind = classifyUrl(tabUrl || '');
+  const result = kind === 'search' || kind === 'home'
+    ? await captureSearchTab(tabId, tabUrl)
+    : await captureTab(tabId, tabUrl);
+  await saveLastCapture({ result, at: Date.now() });
+  await broadcast({ type: 'CAPTURE_RESULT', result });
+  return result;
+}
+
+/**
+ * Add everything on a results page in one press.
+ *
+ * This is the flow the brief actually describes: search Alibaba, then compare
+ * the results. Requiring a click into each product page first made the
+ * extension look broken at the point of use.
+ */
+async function captureSearchTab(tabId, tabUrl) {
+  let harvest;
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: harvestSearchPage,
+    });
+    harvest = results?.[0]?.result;
+  } catch (err) {
+    return {
+      ok: false,
+      state: 'error',
+      message: {
+        tone: 'danger',
+        title: 'Could not read this page',
+        body: String(err?.message || err),
+      },
+      pageUrl: tabUrl,
+    };
+  }
+
+  if (!harvest || !Array.isArray(harvest.candidates) || harvest.candidates.length === 0) {
+    return {
+      ok: false,
+      state: 'no-results',
+      message: {
+        tone: 'warn',
+        title: 'Nothing to add on this page',
+        body:
+          'No supplier cards were found. Alibaba only shows results after you search, and it ' +
+          'replaces the list as you scroll. Scroll until results are on screen, then try again.',
+      },
+      pageUrl: tabUrl,
+    };
+  }
+
+  const records = harvest.candidates
+    .map((c) => makeRecord({
+      ...c,
+      origin: 'search',
+      provenance: { __source: 'search-cards' },
+      capturedAt: new Date().toISOString(),
+    }))
+    .filter((r) => r.companyName || r.title);
+
+  if (records.length === 0) {
+    return {
+      ok: false,
+      state: 'no-results',
+      message: {
+        tone: 'warn',
+        title: 'No supplier names found',
+        body:
+          'Cards were found but none of them had a readable company name. Alibaba changes this ' +
+          'layout often — use "Copy diagnostic snapshot" in settings and send it in a bug report.',
+      },
+      pageUrl: tabUrl,
+    };
+  }
+
+  const { added, updated } = await upsertRecords(records);
+  await refreshBadge();
+
+  return {
+    ok: true,
+    action: added > 0 ? 'added-many' : 'updated',
+    added,
+    updated,
+    total: records.length,
+    scene: harvest.scene,
+    pageUrl: tabUrl,
+  };
+}
+
 async function captureActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || typeof tab.id !== 'number') {
@@ -189,12 +347,19 @@ chrome.runtime.onStartup?.addListener(() => {
   chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch(() => {});
+  getLastTab().then((t) => { if (t) lastKnownTab = t; }).catch(() => {});
 });
 refreshBadge();
 
 chrome.action.onClicked.addListener(async (tab) => {
-  const result = await captureTab(tab.id, tab.url);
-  await broadcast({ type: 'CAPTURE_RESULT', result });
+  await captureAndReport(tab.id, tab.url);
+});
+
+// Switching tabs invalidates whatever the panel last advised about. On a fresh
+// panel the tab URL may be unreadable, so tell the panel to re-check rather than
+// leave it describing a page the user has left.
+chrome.tabs?.onActivated?.addListener?.(() => {
+  broadcast({ type: 'TAB_CHANGED' });
 });
 
 // ------------------------------------------------------------------ messages
@@ -204,15 +369,37 @@ const HANDLERS = {
     return { records: await getRecords(), settings: await getSettings() };
   },
 
+  /**
+   * What the panel needs to know about the current page, plus any capture
+   * result it missed while it was still loading.
+   */
+  async GET_TAB_CONTEXT() {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    // The action click grants activeTab, so this is readable at that moment.
+    if (tab?.url) rememberTab(tab.url);
+
+    const stored = await getLastCapture();
+    const fresh = stored && Date.now() - stored.at < CAPTURE_TTL_MS ? stored : null;
+    if (!fresh) await clearLastCapture();
+
+    const url = tab?.url || lastKnownTab.url;
+    return {
+      url,
+      kind: classifyUrl(url),
+      live: Boolean(tab?.url),
+      seenAt: tab?.url ? Date.now() : lastKnownTab.at,
+      pendingResult: fresh ? fresh.result : null,
+    };
+  },
+
   async CAPTURE({ tabId, tabUrl } = {}) {
     let result;
     if (typeof tabId === 'number') {
-      result = await captureTab(tabId, tabUrl);
+      result = await captureAndReport(tabId, tabUrl);
     } else {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      result = await captureTab(tab?.id, tab?.url);
+      result = await captureAndReport(tab?.id, tab?.url);
     }
-    await broadcast({ type: 'CAPTURE_RESULT', result });
     return result;
   },
 
