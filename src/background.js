@@ -6,24 +6,25 @@
  *   2. On that click, read the current tab's product data.
  *   3. Own all storage writes so the panel stays a pure view.
  *
- * Permission model: this extension requests `activeTab`, not
- * `https://*.alibaba.com/*`. That means we get access to a page only at the
- * moment the user clicks our button, and only for the tab they are looking at.
- * Nothing runs on pages the user did not ask about, which is both better
- * privacy and what keeps the extension acceptable to the Chrome Web Store.
+ * Permission model: this extension requests host access to
+ * `https://*.alibaba.com/*` and NOT the broad `tabs` permission. It needs host
+ * access rather than `activeTab` because `activeTab` is a single-use grant: the
+ * toolbar click consumed it, so Re-scan could not read the tab afterwards and
+ * the extension could not inject into a page it had just navigated to. Still no
+ * reading of tab lists, history or any other site's pages.
  */
 
 import { harvestPage } from './extract/harvest.js';
 import { harvestSearchPage } from './extract/search.js';
 import { normalize } from './extract/normalize.js';
 import { classifyPage, PAGE_MESSAGES, classifyUrl, messageForUrl } from './lib/probe.js';
-import { makeRecord } from './lib/schema.js';
 import {
   getRecords, upsertRecord, upsertRecords, removeRecord, clearRecords,
   getSettings, saveSettings, saveDiagnostics, getDiagnostics,
   saveLastCapture, getLastCapture, clearLastCapture,
 } from './lib/store.js';
 import { recordKey } from './lib/schema.js';
+import { buildSearchCapture, healthMessage } from './lib/capture.js';
 import { getExporter } from './lib/exporters/index.js';
 
 const PRODUCT_URL_RE = /^https?:\/\/([\w-]+\.)?alibaba\.com\/.*(product-detail|showproduct)/i;
@@ -274,25 +275,11 @@ async function captureSearchTab(tabId, tabUrl) {
     };
   }
 
-  const records = harvest.candidates
-    .map((c) => makeRecord({
-      ...c,
-      origin: 'search',
-      provenance: { __source: 'search-cards' },
-      capturedAt: new Date().toISOString(),
-    }))
-    .filter((r) => r.companyName || r.title);
-
-  // A capture is judged on whether the fields a buyer acts on are actually
-  // there, not on how many rows it produced. A full table of wrong values is
-  // worse than an error, because it looks like a result.
-  const health = assessCapture(records, { strategy: harvest.strategy, anchors: harvest.anchors });
-  await saveDiagnostics({
-    strategy: harvest.strategy,
-    anchors: harvest.anchors,
-    cardSamples: harvest.cardSamples,
-    health: { verdict: health.verdict, coverage: health.coverage, summary: summarise(health) },
-  });
+  // One tested function does the whole thing: records, verdict, evidence.
+  // See src/lib/capture.js — this path is covered end to end in
+  // test/capture.test.js, which is what it lacked when it threw.
+  const { records, health, evidence } = buildSearchCapture(harvest);
+  await saveDiagnostics(evidence);
 
   if (records.length === 0) {
     return {
@@ -315,6 +302,7 @@ async function captureSearchTab(tabId, tabUrl) {
   // The rows are kept — half a table is worth more than none — but the panel is
   // told exactly what is missing, so a broken capture can never pass as a good
   // one again.
+  const message = healthMessage(health);
   return {
     ok: true,
     action: added > 0 ? 'added-many' : 'updated',
@@ -324,15 +312,7 @@ async function captureSearchTab(tabId, tabUrl) {
     scene: harvest.scene,
     pageUrl: tabUrl,
     health,
-    ...(health.verdict === 'ok'
-      ? {}
-      : {
-        message: {
-          tone: health.verdict === 'broken' ? 'error' : 'warn',
-          title: health.verdict === 'broken' ? 'Capture looks broken' : 'Partial data',
-          body: `${health.reason}${health.advice ? ` ${health.advice}` : ''}`,
-        },
-      }),
+    ...(message ? { message } : {}),
   };
 }
 

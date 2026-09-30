@@ -10,15 +10,25 @@
  * What it runs, in order of what it protects against:
  *
  *   1. unit tests            the logic is right
- *   2. pre-flight            the extension loads: manifest, permissions, imports
- *   3. contract check        THE PAGE still has what the extractor needs, and a
+ *   2. wiring                no symbol is used without being imported
+ *   3. pre-flight            the extension loads: manifest, permissions, assets
+ *   4. contract check        THE PAGE still has what the extractor needs, and a
  *                            real capture fills the fields the contract requires
- *   4. real-page capture     the shipped extractor, in a real browser, on a real
+ *   5. real-page capture     the shipped extractor, in a real browser, on a real
  *                            saved Alibaba page
- *   5. panel render          every UI state renders, with no console errors, and
+ *   6. the real button       the extension is LOADED in a browser and the panel's
+ *                            own CAPTURE message runs, so the service worker
+ *                            executes for real. Stages 1-5 each test one module;
+ *                            none of them executes the line that wires them
+ *                            together, which is how "assessCapture is not
+ *                            defined" shipped with every other stage green
+ *   7. panel render          every UI state renders, with no console errors, and
  *                            no state can hide data without saying so
- *   6. export shape          what lands in the user's sheet is rectangular and
+ *   8. export shape          what lands in the user's sheet is rectangular and
  *                            carries the fields the contract requires
+ *
+ * Stage 6 is the one that matters most. It is the only stage that presses the
+ * button.
  *
  * Usage:
  *   node tools/verify-all.mjs            # everything
@@ -51,10 +61,12 @@ function check(name, fn) {
 }
 
 stage('unit tests', 'node', ['--test', 'test/*.test.js']);
+stage('wiring: every symbol is imported', 'node', ['tools/import-check.mjs']);
 stage('pre-flight', 'node', ['tools/verify.mjs']);
 if (!fast) {
   stage('capture contract vs the real page', 'node', ['tools/contract-check.mjs'], { browser: true });
   stage('real-page capture', 'node', ['tools/real-page-test.mjs'], { browser: true });
+  stage('the real button, pressed in a browser', 'node', ['tools/extension-smoke-test.mjs'], { browser: true });
   stage('panel states', 'node', ['tools/panel-preview.mjs'], { browser: true });
 }
 

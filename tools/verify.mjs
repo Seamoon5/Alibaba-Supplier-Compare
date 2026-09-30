@@ -6,6 +6,7 @@
  */
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -161,6 +162,21 @@ for (const size of [16, 32, 48, 128]) {
 
 console.log('manifest   : v%s, permissions [%s]', manifest.manifest_version, perms.join(', '));
 console.log('host access: %s', hosts.join(', ') || 'none');
+
+// A name that is used but never imported throws only when it is CALLED, which is
+// how "assessCapture is not defined" reached production: every other check was
+// green and nothing executed that line. So the wiring is checked here too.
+const importCheck = spawnSync(process.execPath, ['tools/import-check.mjs'], {
+  cwd: root, encoding: 'utf8',
+});
+const importOut = ((importCheck.stdout || '') + (importCheck.stderr || '')).trim().split('\n');
+for (const line of importOut) {
+  if (line.includes('every name') || line.includes('✗')) console.log('imports    :', line.trim());
+}
+if (importCheck.status !== 0) {
+  problems.push('a symbol is used but never imported — see the import-check output above');
+}
+
 for (const n of notes) console.log('note       :', n);
 if (problems.length) {
   console.log('\nPROBLEMS');
