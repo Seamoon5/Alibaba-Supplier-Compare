@@ -283,6 +283,17 @@ async function captureSearchTab(tabId, tabUrl) {
     }))
     .filter((r) => r.companyName || r.title);
 
+  // A capture is judged on whether the fields a buyer acts on are actually
+  // there, not on how many rows it produced. A full table of wrong values is
+  // worse than an error, because it looks like a result.
+  const health = assessCapture(records, { strategy: harvest.strategy, anchors: harvest.anchors });
+  await saveDiagnostics({
+    strategy: harvest.strategy,
+    anchors: harvest.anchors,
+    cardSamples: harvest.cardSamples,
+    health: { verdict: health.verdict, coverage: health.coverage, summary: summarise(health) },
+  });
+
   if (records.length === 0) {
     return {
       ok: false,
@@ -301,6 +312,9 @@ async function captureSearchTab(tabId, tabUrl) {
   const { added, updated } = await upsertRecords(records);
   await refreshBadge();
 
+  // The rows are kept — half a table is worth more than none — but the panel is
+  // told exactly what is missing, so a broken capture can never pass as a good
+  // one again.
   return {
     ok: true,
     action: added > 0 ? 'added-many' : 'updated',
@@ -309,6 +323,16 @@ async function captureSearchTab(tabId, tabUrl) {
     total: records.length,
     scene: harvest.scene,
     pageUrl: tabUrl,
+    health,
+    ...(health.verdict === 'ok'
+      ? {}
+      : {
+        message: {
+          tone: health.verdict === 'broken' ? 'error' : 'warn',
+          title: health.verdict === 'broken' ? 'Capture looks broken' : 'Partial data',
+          body: `${health.reason}${health.advice ? ` ${health.advice}` : ''}`,
+        },
+      }),
   };
 }
 

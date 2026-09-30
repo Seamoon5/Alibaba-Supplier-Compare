@@ -11,6 +11,8 @@
     "preview": "node tools/panel-preview.mjs",
     "verify": "node tools/verify.mjs && node tools/panel-preview.mjs",
     "live-test": "node tools/live-test.mjs",
-    "test:real": "node tools/real-page-test.mjs"
+    "test:real": "node tools/real-page-test.mjs",
+    "contract": "node tools/contract-check.mjs",
+    "verify:all": "node tools/verify-all.mjs"
   }
 }

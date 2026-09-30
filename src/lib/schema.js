@@ -50,6 +50,7 @@ export const FIELD_LABELS = {
   reorderRate: 'Reorder rate',
   onlineRevenue: 'Online revenue',
   leadTime: 'Lead time',
+  priceTiers: 'Price tiers',
   tierCount: 'Price tiers',
   priceRange: 'Price range',
   products: 'Products listed',

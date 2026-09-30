@@ -122,6 +122,48 @@ it and exported, because a sheet that shows only the low end quietly misquotes t
 Each product on a supplier card carries its own minimum order — 2 pieces on one line, 500 on the
 next — so the MOQ reported is the one belonging to the product actually being priced.
 
+### The gate: `npm run verify:all`
+
+Nothing ships until this passes. It exists because of how this extension failed
+three times in a row — each release was declared fixed on the strength of unit
+tests that passed while the real page was broken.
+
+| Stage | What it protects against |
+|---|---|
+| unit tests | logic regressions |
+| pre-flight | manifest, permissions, broken imports |
+| **capture contract vs the real page** | Alibaba changed the markup |
+| **real-page capture** | the shipped extractor does not work on real HTML |
+| **every panel state rendered** | a state that hides data, or a console error |
+| **a broken capture is rejected** | the honesty layer being quietly broken |
+| export shape | the sheet missing a required field or going ragged |
+
+Two of those stages are deliberately adversarial, because a checker that cannot
+fail is worse than none:
+
+- the contract re-checks the same page with its key attribute **removed** and
+  requires that run to fail
+- the capture that shipped broken in v1.0 is kept forever in
+  `docs/fixtures/broken-capture-v1.json` and must still be rejected
+
+**Look at the rendered screenshots before believing a green gate.** Every defect
+that survived the automated checks was found there.
+
+### Telling a broken capture from a good one
+
+`src/lib/health.js` scores a capture by whether the values are *plausible*, not
+by how many rows it produced. A company name that parses as a price counts as
+**missing**:
+
+```
+BROKEN 73% — 4 rows, price-tier-box, supplier name 0/4 price 0/4 …
+  This capture looks broken: 4 of 4 rows missing supplier name…
+  Press "Copy page structure" in settings and paste it in a bug report
+```
+
+That is the v1.0 failure, detected generically, with a way to report it. When a
+capture is fine it says nothing, because a good capture needs no explanation.
+
 ### Testing against a real page
 
 `npm test` proves the code does what it was written to do. It cannot prove Alibaba still renders
@@ -251,15 +293,20 @@ tools/
   verify.mjs                 pre-flight / store-readiness checks
   live-test.mjs              run the real extension against a live Alibaba page
   real-page-test.mjs         run the extractor against a page you saved (Ctrl+S)
-test/                        90 unit tests
+  contract-check.mjs         the capture contract, proved against the real page
+  verify-all.mjs             THE GATE: everything above, in order
+test/                        108 unit tests
 docs/screenshots/            panel states, rendered from a real capture
-docs/fixtures/              a real capture, committed so previews are never invented
+docs/capture-contract.json   what a working capture is, machine-checked
+docs/fixtures/              a real capture, and the broken one, both committed
+AGENTS.md                   the rules for working on this, and why they exist
 ```
 
 ## Version history
 
 | Version | Date | What changed |
 |---|---|---|
+| **2.2.0** | 2026-09-30 | **A gate, so this cannot break silently again.** Three releases failed the same way — written from a guess about Alibaba's markup, green tests, wrong data shipped. Now: `docs/capture-contract.json` defines what a good capture is and `tools/contract-check.mjs` proves the live page still matches it (and self-tests by re-checking a page with its attributes removed, which must fail); `tools/verify-all.mjs` is a seven-stage gate that must pass before anything ships; `src/lib/health.js` judges a capture on whether values are *plausible*, so a company name that parses as a price counts as missing; `docs/fixtures/broken-capture-v1.json` preserves the capture that actually shipped broken and must still be rejected; the panel gains **Copy page structure**, which copies two result cards as rendered so a bug report is one paste instead of a screenshot; and `AGENTS.md` writes the rules down for whoever works on this next. 108 unit tests. |
 | **2.1.1** | 2026-09-30 | The panel can no longer be left looking empty by an invisible filter. A saved filter that removes every row now shows "Filters on: …" with a **show all suppliers** button that clears them in one click, and the count reads "6 hidden by verified suppliers only + factories only". The preview harness fails the build if rows are ever hidden without that escape hatch. |
 | **2.1.0** | 2026-09-30 | **Rewritten against a real saved page.** The Suppliers tab is marked up with hashed class names and was being read by guesswork. Now every field comes from a stable signal: `data-supplier-card`, `data-dot-params` (company id + Alibaba's own factory flag), `span[title]` for the name, `img[alt="countryFlag]` for the country and province, `data-supplier-card-gold-years`, `data-supplier-card-reviews`, `a[data-supplier-card-product]` for each product's price and its own MOQ. Adds rating, review count, province and Main products to the panel and the export. New `npm run test:real` runs the shipped extractor against a page you saved with Ctrl+S, in a real browser, and fails if any supplier comes back without a name or a country; its capture renders the panel screenshots. The panel now names the active filters instead of saying "hidden by the current filters". Fixed: a card with no `title` attribute lost its name because the fallback reader was handed a pipe-joined string instead of the card text; `<1k` revenue was dropped because the reader had no comparator; product offers were lost on layouts without product-tile markers. |
 | **2.0.0** | 2026-09-29 | **The Suppliers tab is read correctly.** The company card is now measured from its header (name, flag, badges, credentials) and its prices come from the product tiles, not from the price-tier box. Fixes `US$5,000` appearing as a supplier name and `US` as a country, and the whole page reporting "no published price". New: price ranges kept (`up to X`), the product strip shown in the panel, `Unit price up to` / `Products listed` / `Other products` columns in the export, clearer note about unpriced suppliers. `Response time` keeps its `<` so `<1h` is not flattened to `1h`. |

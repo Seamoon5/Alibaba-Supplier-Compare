@@ -1,0 +1,159 @@
+{
+  "_comment": [
+    "THE CAPTURE CONTRACT. This is the single source of truth for what a working",
+    "capture looks like on an Alibaba suppliers results page. Two checkers read it:",
+    "  tools/contract-check.mjs  verifies the live page still has these anchors and",
+    "                             that a real capture fills these fields",
+    "  test/contract.test.js    is the same contract as a unit test",
+    "A failure here means Alibaba changed the page, NOT that the user did something",
+    "wrong. Fix the extractor against the page, never against a guess.",
+    "",
+    "Rules that exist because guessing caused three broken releases:",
+    "  - anchors must be data-* attributes, alt text or labels, never class names",
+    "  - every required field must be present on at least this share of rows",
+    "  - 'minRows' is the floor for a real results page; below it the page is",
+    "    still loading or the user must scroll"
+  ],
+  "version": 1,
+  "verifiedOn": "2026-09-30",
+  "verifiedFrom": "Ctrl+S save of alibaba.com/search/page?SearchScene=suppliers&SearchText=caps",
+  "pages": {
+    "suppliers": {
+      "urlPattern": "SearchScene=suppliers",
+      "minRows": 5,
+      "anchors": [
+        {
+          "selector": "[data-supplier-card=\"true\"]",
+          "minCount": 5,
+          "means": "the card itself"
+        },
+        {
+          "selector": "a[data-supplier-card-product]",
+          "minCount": 1,
+          "means": "one of the supplier's products"
+        },
+        {
+          "selector": "img[alt=\"countryFlag\"]",
+          "minCount": 1,
+          "means": "the country flag"
+        },
+        {
+          "selector": "[data-supplier-card-gold-years]",
+          "minCount": 1,
+          "means": "years on Alibaba"
+        },
+        {
+          "selector": "[data-supplier-card-reviews]",
+          "minCount": 0,
+          "means": "review count link"
+        },
+        {
+          "selector": "span[title]",
+          "minCount": 1,
+          "means": "the company name"
+        },
+        {
+          "selector": "a[href*=\"/product-detail/\"]",
+          "minCount": 1,
+          "means": "product URL, used for the title slug"
+        }
+      ],
+      "forbiddenAnchors": [
+        {
+          "pattern": "class=",
+          "why": "Alibaba hashes class names per deploy; they change without warning"
+        }
+      ]
+    },
+    "products": {
+      "urlPattern": "/search/page",
+      "minRows": 1,
+      "anchors": [
+        {
+          "selector": "a[href*=\"/product-detail/\"]",
+          "minCount": 1,
+          "means": "one offer per card"
+        }
+      ]
+    }
+  },
+  "fields": [
+    {
+      "field": "companyName",
+      "required": true,
+      "minRatio": 0.95,
+      "from": "span[title] that is not inside a product tile",
+      "exportLabel": "Supplier"
+    },
+    {
+      "field": "country",
+      "required": true,
+      "minRatio": 0.95,
+      "from": "img[alt=countryFlag], code in the next sibling",
+      "exportLabel": "Country"
+    },
+    {
+      "field": "priceTiers",
+      "required": true,
+      "minRatio": 0.8,
+      "from": "the first price line of each product tile",
+      "exportLabel": "Unit price at Qty"
+    },
+    {
+      "field": "currency",
+      "required": true,
+      "minRatio": 0.8,
+      "from": "the symbol on that price line, US$ means USD",
+      "exportLabel": "Currency"
+    },
+    {
+      "field": "moqQty",
+      "required": false,
+      "minRatio": 0.6,
+      "from": "'Min. order: N unit' inside the same product tile",
+      "exportLabel": "MOQ"
+    },
+    {
+      "field": "yearsOnPlatform",
+      "required": false,
+      "minRatio": 0.6,
+      "from": "[data-supplier-card-gold-years]",
+      "exportLabel": "Years on Alibaba"
+    },
+    {
+      "field": "rating",
+      "required": false,
+      "minRatio": 0.4,
+      "from": "the '4.8/5' text next to the name",
+      "exportLabel": "Rating"
+    },
+    {
+      "field": "reviewCount",
+      "required": false,
+      "minRatio": 0.4,
+      "from": "[data-supplier-card-reviews]",
+      "exportLabel": "Reviews"
+    },
+    {
+      "field": "onTimeDelivery",
+      "required": false,
+      "minRatio": 0.4,
+      "from": "'On-time delivery 100%'",
+      "exportLabel": null
+    },
+    {
+      "field": "province",
+      "required": false,
+      "minRatio": 0.2,
+      "from": "the text before the country flag",
+      "exportLabel": "Location"
+    }
+  ],
+  "honesty": {
+    "comment": "Rules the UI must keep, checked by tools/panel-preview.mjs.",
+    "noSilentHiding": "If any row is hidden by a filter, the panel names the filter, says how many rows, and offers one click to clear them.",
+    "noInventedValues": "A field the page does not publish shows '\u2014' or 'not shown'. It is never guessed.",
+    "rangeIsHonest": "A published range keeps both ends; the low end ranks and the high end is shown and exported.",
+    "degradedIsLoud": "A capture missing a required field on more than a fifth of its rows raises a banner naming the field."
+  }
+}

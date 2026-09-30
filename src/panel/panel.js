@@ -42,6 +42,7 @@ const el = {
   btnCsv: $('btnCsv'),
   btnClear: $('btnClear'),
   btnDiagnostics: $('btnDiagnostics'),
+  btnStructure: $('btnStructure'),
   btnReset: $('btnReset'),
 };
 
@@ -700,6 +701,42 @@ el.btnReset.addEventListener('click', async () => {
   }
 });
 
+/**
+ * The repair button. Pasted into a bug report, this is enough to fix a broken
+ * extractor: the two result cards as they are actually rendered, plus which
+ * anchors matched and how many of each the page contains.
+ */
+el.btnStructure.addEventListener('click', async () => {
+  const res = await send('GET_DIAGNOSTICS');
+  const d = res.diagnostics;
+  if (!d) {
+    toast('No capture yet — press the toolbar button on a results page first', 'error');
+    return;
+  }
+  const anchors = d.anchors || {};
+  const report = [
+    'Alibaba Supplier Compare — page structure',
+    `Captured : ${d.savedAt || 'unknown'}`,
+    `Strategy : ${d.strategy || 'unknown'}`,
+    d.health ? `Health   : ${d.health.summary || d.health.verdict}` : '',
+    '',
+    'Anchors found on the page:',
+    ...Object.entries(anchors).map(([k, v]) => `  ${String(k).padEnd(14)} ${v}`),
+    '',
+    'Result cards as rendered (2):',
+    ...(d.cardSamples || []).map((html, i) => `\n----- card ${i + 1} -----\n${html}`),
+    d.cardSamples && d.cardSamples.length
+      ? ''
+      : '\n(no cards were captured — the page had none, or the extractor found nothing)',
+  ].join('\n');
+  try {
+    await navigator.clipboard.writeText(report);
+    toast(`Page structure copied (${report.length.toLocaleString()} chars)`);
+  } catch {
+    toast('Could not copy — check clipboard access', 'error');
+  }
+});
+
 el.btnDiagnostics.addEventListener('click', async () => {
   const res = await send('GET_DIAGNOSTICS');
   const d = res.diagnostics;
@@ -710,6 +747,8 @@ el.btnDiagnostics.addEventListener('click', async () => {
   const report = [
     'Alibaba Supplier Compare — capture diagnostics',
     `Saved: ${d.savedAt || 'unknown'}`,
+    d.health ? `Health      : ${d.health.summary || d.health.verdict}` : '',
+    `Strategy     : ${d.strategy || 'n/a'}`,
     `Blob variable : ${d.blobName || 'not found'} (via ${d.blobVia || 'n/a'})`,
     `Blob present  : ${d.foundAnyBlob ? 'yes' : 'no'}`,
     `JSON-LD found : ${d.sawLd ? 'yes' : 'no'}`,

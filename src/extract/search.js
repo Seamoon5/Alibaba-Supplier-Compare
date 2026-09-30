@@ -596,8 +596,9 @@ export function harvestSearchPage() {
   else if (/\/companies?\//i.test(location.pathname) || /company-detail/i.test(u)) scene = 'suppliers';
 
   var records = [];
+  var supplierCards = [];
   if (scene === 'suppliers') {
-    var supplierCards = collectSupplierCards();
+    supplierCards = collectSupplierCards();
     var byId = {};
     for (var s = 0; s < supplierCards.length; s++) {
       var sup = parseSupplierCard(supplierCards[s]);
@@ -631,6 +632,25 @@ export function harvestSearchPage() {
     unique.push(records[r]);
   }
 
+  // ------------------------------------------------------------- evidence
+  // When Alibaba changes this page, the fix needs the real markup, not a
+  // screenshot and not a guess. Two cards' outerHTML plus the anchors that
+  // matched is everything a repair needs, in one paste.
+  function trimHtml(el, max) {
+    var html = '';
+    try {
+      html = el.outerHTML || '';
+    } catch (e) {
+      return '(unreadable)';
+    }
+    return html.length > max ? html.slice(0, max) + '\n…[truncated]' : html;
+  }
+
+  var cardSamples = [];
+  for (var cs = 0; cs < Math.min(supplierCards.length, 2); cs++) {
+    cardSamples.push(trimHtml(supplierCards[cs], 4000));
+  }
+
   return {
     ok: unique.length > 0,
     page: 'search',
@@ -638,6 +658,19 @@ export function harvestSearchPage() {
     url: location.href,
     title: document.title,
     count: unique.length,
+    // Which signal found the cards: the stable data attribute, or the label
+    // fallback. If this flips to "labels", Alibaba dropped the attributes and
+    // the extractor is living on borrowed time.
+    strategy: all(document, CARD_SEL).length > 0 ? 'data-supplier-card' : 'label-fallback',
+    anchors: {
+      card: all(document, CARD_SEL).length,
+      productTile: all(document, TILE_SEL).length,
+      countryFlag: all(document, 'img[alt="countryFlag"]').length,
+      goldYears: all(document, '[data-supplier-card-gold-years]').length,
+      reviews: all(document, '[data-supplier-card-reviews]').length,
+      companyTitle: all(document, 'span[title]').length,
+    },
+    cardSamples: cardSamples,
     candidates: unique,
     pricedCount: unique.filter(function (x) {
       return Array.isArray(x.priceTiers) && x.priceTiers.length > 0;

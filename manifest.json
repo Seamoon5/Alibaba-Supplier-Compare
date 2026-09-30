@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Alibaba Supplier Compare",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "Compare Alibaba suppliers side by side: tiered prices at your target quantity, MOQ, certifications and Trade Assurance. Exports to Sheets.",
   "minimum_chrome_version": "116",
 

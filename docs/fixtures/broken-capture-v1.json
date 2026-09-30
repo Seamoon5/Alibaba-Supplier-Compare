@@ -1,0 +1,80 @@
+{
+  "_comment": [
+    "The capture produced by v1.0, kept forever as a regression fixture.",
+    "This is real output from a real Alibaba suppliers page. Every row looks",
+    "populated — which is exactly why it shipped: nothing complained. The",
+    "supplier name is a price box, the country came out of the 'US$' of a",
+    "price, and no row has a price at all.",
+    "tools/verify-all.mjs asserts this is REJECTED. If a change ever makes this",
+    "look acceptable, the gate fails and the honesty layer has been broken."
+  ],
+  "source": "alibaba.com/search/page?SearchScene=suppliers&SearchText=caps (v1.0, 2026-09-29)",
+  "strategy": "price-tier-box",
+  "count": 4,
+  "candidates": [
+    {
+      "productId": "US$3,000|US$3,000",
+      "title": "US$1.70-2.20 Min. order: 10 pieces",
+      "sourceUrl": "https://www.alibaba.com/product-detail/_1600000000000.html",
+      "companyName": "US$4.20-5.10 Min. order: 10 pieces",
+      "country": "US",
+      "yearsOnPlatform": null,
+      "verifiedSupplier": false,
+      "businessType": "",
+      "currency": "",
+      "moqQty": 10,
+      "moqUnit": "pieces",
+      "priceTiers": [],
+      "priceTo": null,
+      "products": []
+    },
+    {
+      "productId": "US$3,000|US$3,001",
+      "title": "US$1.68-6.41 Min. order: 50 pieces",
+      "sourceUrl": "https://www.alibaba.com/product-detail/_1600000000001.html",
+      "companyName": "US$1.89-4 Min. order: 50 pieces",
+      "country": "US",
+      "yearsOnPlatform": null,
+      "verifiedSupplier": false,
+      "businessType": "",
+      "currency": "",
+      "moqQty": 50,
+      "moqUnit": "pieces",
+      "priceTiers": [],
+      "priceTo": null,
+      "products": []
+    },
+    {
+      "productId": "US$5,000|US$5,002",
+      "title": "US$1.13 Min. order: 5 pieces",
+      "sourceUrl": "https://www.alibaba.com/product-detail/_1600000000002.html",
+      "companyName": "US$1.13 Min. order: 5 pieces",
+      "country": "US",
+      "yearsOnPlatform": null,
+      "verifiedSupplier": false,
+      "businessType": "",
+      "currency": "",
+      "moqQty": 5,
+      "moqUnit": "pieces",
+      "priceTiers": [],
+      "priceTo": null,
+      "products": []
+    },
+    {
+      "productId": "US$5,000|US$5,003",
+      "title": "US$1.69-2.37 Min. order: 50 pieces",
+      "sourceUrl": "https://www.alibaba.com/product-detail/_1600000000003.html",
+      "companyName": "US$1.69-2.37 Min. order: 50 pieces",
+      "country": "US",
+      "yearsOnPlatform": null,
+      "verifiedSupplier": false,
+      "businessType": "",
+      "currency": "",
+      "moqQty": 50,
+      "moqUnit": "pieces",
+      "priceTiers": [],
+      "priceTo": null,
+      "products": []
+    }
+  ]
+}
