@@ -74,6 +74,171 @@ function card({ name, meta = '', links = [] }) {
   return new Node('div', { text: `${name}\n${meta}`, children: [body] });
 }
 
+// ------------------------------------------------- the real supplier card
+//
+// Built from a screenshot of a live Alibaba suppliers search. This is the shape
+// that broke v1.0: a COMPANY card holding a credential strip, a price-tier box
+// ("US$5,000 Min. order: 1 set") and a strip of product tiles with their own
+// price ranges. Reading it with the per-offer strategy put "US$5,000" in the
+// supplier column, "US" in the country column, and no price at all in the rest.
+
+/**
+ * @param {object} spec
+ * @param {string} spec.company  company name as rendered in the header
+ * @param {string} [spec.companyHref] present on the real page; omit to test fallback
+ * @param {string[]} spec.header extra header lines (flag code, badges)
+ * @param {[string,string][]} spec.tiles [title, priceText] pairs
+ * @param {string} [spec.metrics] the On-time / Reorder / Response / Revenue block
+ * @param {string} [spec.tierBox] the "Min. order" price-tier box
+ */
+function supplierCard({
+  company,
+  companyHref,
+  header = [],
+  tiles = [],
+  metrics = '',
+  tierBox = '',
+}) {
+  const children = [];
+  if (companyHref) {
+    children.push(new Node('a', { text: company, attrs: { href: companyHref } }));
+  }
+  const headerText = [company, ...header].join('\n');
+  children.push(new Node('div', { text: headerText }));
+  if (metrics) children.push(new Node('div', { text: metrics }));
+  if (tierBox) children.push(new Node('div', { text: tierBox }));
+
+  tiles.forEach(([title, price], i) => {
+    children.push(new Node('div', {
+      text: `${title}\n${price}`,
+      children: [new Node('a', {
+        text: title,
+        attrs: { title, href: `https://www.alibaba.com/product-detail/_17000${i}0000.html` },
+      })],
+    }));
+  });
+
+  const all = [headerText, metrics, tierBox, ...tiles.map(([t, p]) => `${t}\n${p}`)]
+    .filter(Boolean).join('\n');
+  return new Node('div', { text: all, children });
+}
+
+const METRICS = [
+  'Matches 2/2 requirements',
+  'On-time delivery 100%',
+  'Reorder rate -',
+  'Response time <1h',
+  'Online revenue $2M-$5M',
+].join('\n');
+
+const LIVE_CARD = {
+  company: 'Zhuji Yuanheng Sewing Equipment Co., Ltd.',
+  companyHref: 'https://www.alibaba.com/company-detail/zhujiyuanheng.html',
+  header: ['Zhejiang. CN', '1yr'],
+  metrics: METRICS,
+  tierBox: 'US$5,000\nMin. order: 1 set',
+  tiles: [
+    ['DISEN Large Format Single Head Computer', 'US$1,250-4,500'],
+    ['High Quality Commercial logo Hat', 'US$6,900-7,200'],
+    ['Shenzhen Hoos NZ Automatic', 'US$12,500-13,500'],
+  ],
+};
+
+test('the live supplier card yields the company, not its price box', () => {
+  const url = 'https://www.alibaba.com/search/page?SearchScene=suppliers&SearchText=embroidery+chenille+machine';
+  const out = withDom([supplierCard(LIVE_CARD)], url, () => harvestSearchPage());
+  assert.equal(out.scene, 'suppliers');
+  assert.equal(out.count, 1);
+
+  const r = out.candidates[0];
+  assert.equal(r.companyName, 'Zhuji Yuanheng Sewing Equipment Co., Ltd.');
+  assert.equal(r.country, 'CN');
+  assert.equal(r.yearsOnPlatform, 1);
+  assert.equal(r.onTimeDelivery, 100);
+  assert.equal(r.responseRate, '<1h');
+  assert.equal(r.onlineRevenue, '$2M-$5M');
+});
+
+test('the price comes from the product tile, not from "US$5,000 Min. order: 1 set"', () => {
+  const url = 'https://www.alibaba.com/search/page?SearchScene=suppliers&SearchText=embroidery+chenille+machine';
+  const out = withDom([supplierCard(LIVE_CARD)], url, () => harvestSearchPage());
+  const r = out.candidates[0];
+
+  assert.equal(r.currency, 'USD');
+  assert.equal(r.priceTiers.length, 1);
+  assert.equal(r.priceTiers[0].unitPrice, 1250, 'rank on the cheapest published offer');
+  assert.equal(r.priceTo, 4500, 'the high end of the published range is kept, not discarded');
+  assert.equal(out.pricedCount, 1, 'a supplier with a published price is not counted as unpriced');
+});
+
+test('the product strip is kept so you can see what else the factory makes', () => {
+  const url = 'https://www.alibaba.com/search/page?SearchScene=suppliers&SearchText=embroidery+chenille+machine';
+  const out = withDom([supplierCard(LIVE_CARD)], url, () => harvestSearchPage());
+  const r = out.candidates[0];
+
+  assert.equal(r.products.length, 3);
+  assert.deepEqual(r.products.map((p) => p.from), [1250, 6900, 12500], 'cheapest first');
+  assert.equal(r.products[0].title, 'DISEN Large Format Single Head Computer');
+  assert.equal(r.products[0].to, 4500);
+  assert.match(r.sourceUrl, /product-detail/);
+  assert.equal(r.title, 'DISEN Large Format Single Head Computer');
+});
+
+test('"US$" is never mistaken for the country "US"', () => {
+  const url = 'https://www.alibaba.com/search/page?SearchScene=suppliers&SearchText=shirt';
+  const cases = [
+    [supplierCard({ ...LIVE_CARD, header: ['CN'] }), 'CN'],
+    // Only a price to go on: the honest answer is "unknown", not "United States".
+    [
+      supplierCard({
+        company: 'Nameless Trading Co',
+        header: ['3 yrs'],
+        tierBox: 'Min. order: 1 set',
+        tiles: [['Widget', 'US$900-1,200']],
+      }),
+      '',
+    ],
+  ];
+  for (const [node, expected] of cases) {
+    const out = withDom([node], url, () => harvestSearchPage());
+    assert.equal(out.candidates[0].country, expected, `country for ${out.candidates[0].companyName}`);
+  }
+});
+
+test('a company name ending in a two-letter code keeps every letter', () => {
+  // Regression guard for an alternation that was not grouped: "SOURCING" was
+  // being truncated to "SOURCG" because "IN" matched as its own alternative.
+  const url = 'https://www.alibaba.com/search/page?SearchScene=suppliers&SearchText=shirt';
+  const out = withDom([supplierCard({ ...LIVE_CARD, company: 'AARYAN SOURCING', companyHref: 'https://www.alibaba.com/company-detail/aaryan.html' })], url, () => harvestSearchPage());
+  assert.equal(out.candidates[0].companyName, 'AARYAN SOURCING');
+});
+
+test('several company cards, with credentials of their own, become one row each', () => {
+  const url = 'https://www.alibaba.com/search/page?SearchScene=suppliers&SearchText=machine';
+  const a = supplierCard(LIVE_CARD);
+  const b = supplierCard({
+    company: 'Guangzhou Disen Electronic Technology Co., Ltd',
+    companyHref: 'https://www.alibaba.com/company-detail/disen.html',
+    header: ['CN', '6 yrs', 'Verified'],
+    tiles: [['DISEN Single Head Computer', 'US$6,900-7,200']],
+  });
+  const out = withDom([a, b], url, () => harvestSearchPage());
+  assert.equal(out.count, 2);
+
+  const dis = out.candidates.find((c) => /Disen/.test(c.companyName));
+  assert.equal(dis.verifiedSupplier, true, 'the Verified badge in the header is read');
+  assert.equal(dis.yearsOnPlatform, 6);
+  assert.equal(dis.priceTiers[0].unitPrice, 6900);
+});
+
+test('the same card still works when the company name is not a link', () => {
+  const url = 'https://www.alibaba.com/search/page?SearchScene=suppliers&SearchText=machine';
+  const out = withDom([supplierCard({ ...LIVE_CARD, companyHref: undefined })], url, () => harvestSearchPage());
+  assert.equal(out.count, 1);
+  assert.equal(out.candidates[0].companyName, 'Zhuji Yuanheng Sewing Equipment Co., Ltd.');
+  assert.equal(out.candidates[0].priceTiers[0].unitPrice, 1250);
+});
+
 function install(nodes, url) {
   const saved = { document: globalThis.document, location: globalThis.location };
   const body = new Node('body', { text: nodes.map((n) => n.innerText).join('\n'), children: nodes });
@@ -168,7 +333,7 @@ test('captures a supplier card with its metrics', () => {
   assert.equal(r.verifiedSupplier, true);
   assert.equal(r.onTimeDelivery, 95);
   assert.equal(r.reorderRate, 42);
-  assert.equal(r.responseRate, '1h');
+  assert.equal(r.responseRate, '≤1h');
   assert.equal(r.onlineRevenue, '$50K - $100K');
   assert.equal(r.country, 'BD');
   assert.equal(r.moqQty, 1000);

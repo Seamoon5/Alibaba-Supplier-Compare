@@ -6,7 +6,7 @@
  */
 
 /** Bump when the stored record shape changes incompatibly. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** Where a field's value came from. Stored per field so breakage is diagnosable. */
 export const PROVENANCE = {
@@ -47,6 +47,8 @@ export const FIELD_LABELS = {
   onlineRevenue: 'Online revenue',
   leadTime: 'Lead time',
   tierCount: 'Price tiers',
+  priceRange: 'Price range',
+  products: 'Products listed',
   capturedAt: 'Captured',
   sourceUrl: 'URL',
   companyUrl: 'Supplier URL',
@@ -105,6 +107,36 @@ export function normalizeTiers(raw) {
   return out;
 }
 
+/**
+ * Normalise the product tiles found on a supplier card.
+ *
+ * A supplier card shows up to six of its own products with a price range each.
+ * That strip is the most useful thing on the card — it tells you what else the
+ * factory makes — so it is kept rather than collapsed into the headline price.
+ */
+export function normalizeOffers(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue;
+    const from = toNum(row.from ?? row.priceMin);
+    if (from === null || from < 0) continue;
+    let to = toNum(row.to ?? row.priceMax);
+    if (to !== null && to < from) to = null;
+    out.push({
+      title: str(row.title),
+      from,
+      to,
+      currency: str(row.currency) || 'USD',
+      url: str(row.url),
+    });
+  }
+  // Sort before capping, so a cap can only ever drop the most expensive offers
+  // rather than whatever happened to sit last in the card.
+  out.sort((a, b) => a.from - b.from);
+  return out.slice(0, 6);
+}
+
 /** Build a complete record from loosely-shaped extraction output. */
 export function makeRecord(input = {}) {
   const priceTiers = normalizeTiers(input.priceTiers);
@@ -124,6 +156,8 @@ export function makeRecord(input = {}) {
     image: str(input.image),
 
     priceTiers,
+    priceTo: toNum(input.priceTo),
+    products: normalizeOffers(input.products),
     moqQty: moqQty !== null && moqQty >= 0 ? moqQty : null,
     moqUnit: str(input.moqUnit),
     yearsOnPlatform,

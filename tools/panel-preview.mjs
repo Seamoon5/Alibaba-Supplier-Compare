@@ -102,6 +102,51 @@ const RECORDS = [
   },
 ];
 
+/** Rows as a live Suppliers results page produces them: a company card whose
+ *  prices come from its product tiles, published as ranges. */
+const SUPPLIER_RECORDS = [
+  {
+    productId: 'zhuji', title: 'DISEN Large Format Single Head Computer',
+    sourceUrl: 'https://www.alibaba.com/product-detail/_1700000000000.html',
+    companyName: 'Zhuji Yuanheng Sewing Equipment Co., Ltd.', country: 'CN',
+    yearsOnPlatform: 1, verifiedSupplier: false, tradeAssurance: false, businessType: 'Manufacturer',
+    currency: 'USD', moqQty: 1, moqUnit: 'set', onTimeDelivery: 100, reorderRate: null,
+    responseRate: '<1h', onlineRevenue: '$2M-$5M', confidence: 'high', missing: [], origin: 'search',
+    capturedAt: new Date().toISOString(), provenance: {},
+    priceTiers: [{ minQty: 1, maxQty: null, unitPrice: 1250 }],
+    priceTo: 4500,
+    products: [
+      { title: 'DISEN Large Format Single Head Computer', from: 1250, to: 4500, currency: 'USD' },
+      { title: 'High Quality Commercial logo Hat', from: 6900, to: 7200, currency: 'USD' },
+      { title: 'Shenzhen Hoos NZ Automatic', from: 12500, to: 13500, currency: 'USD' },
+    ],
+  },
+  {
+    productId: 'disen', title: 'DISEN Single Head Computer',
+    sourceUrl: 'https://www.alibaba.com/product-detail/_1700000000001.html',
+    companyName: 'Guangzhou Disen Electronic Technology', country: 'CN',
+    yearsOnPlatform: 6, verifiedSupplier: true, tradeAssurance: true, businessType: 'Manufacturer',
+    currency: 'USD', moqQty: 1, moqUnit: 'set', onTimeDelivery: 98, reorderRate: 40,
+    responseRate: '<2h', onlineRevenue: '$5M-$10M', confidence: 'high', missing: [], origin: 'search',
+    capturedAt: new Date().toISOString(), provenance: {},
+    priceTiers: [{ minQty: 1, maxQty: null, unitPrice: 6900 }],
+    priceTo: 7200,
+    products: [{ title: 'DISEN Single Head Computer', from: 6900, to: 7200, currency: 'USD' }],
+  },
+  {
+    productId: 'nameless', title: 'Commercial logo Hat',
+    sourceUrl: 'https://www.alibaba.com/product-detail/_1700000000002.html',
+    companyName: 'Nameless Trading Co', country: '', yearsOnPlatform: 3,
+    verifiedSupplier: false, tradeAssurance: false, businessType: '', currency: 'USD',
+    moqQty: 1, moqUnit: 'set', onTimeDelivery: null, reorderRate: null, responseRate: '',
+    onlineRevenue: '', confidence: 'high', missing: [], origin: 'search',
+    capturedAt: new Date().toISOString(), provenance: {},
+    priceTiers: [{ minQty: 1, maxQty: null, unitPrice: 12500 }],
+    priceTo: 13500,
+    products: [{ title: 'Commercial logo Hat', from: 12500, to: 13500, currency: 'USD' }],
+  },
+];
+
 const SETTINGS = { targetQty: 2 };
 
 /** Rows as a Suppliers results page produces them: no price ladder. */
@@ -191,6 +236,7 @@ const SCENARIOS = [
   { name: '02-matrix-narrow', width: 320, height: 900, records: RECORDS, settings: SETTINGS, expectVisible: 2 },
   { name: '03-matrix-wide', width: 900, height: 700, records: RECORDS, settings: { targetQty: 5 }, expectVisible: 3 },
   { name: '03b-matrix-search-origin', width: 420, height: 900, records: SEARCH_RECORDS, settings: SETTINGS, expectVisible: 3 },
+  { name: '03c-matrix-supplier-card', width: 460, height: 1100, records: SUPPLIER_RECORDS, settings: { targetQty: 1 }, expectVisible: 3 },
   { name: '04-empty-unknown', width: 420, height: 900, records: [], settings: SETTINGS, tabUrl: OFFSITE_URL },
   { name: '04b-empty-search', width: 420, height: 900, records: [], settings: SETTINGS, tabUrl: SEARCH_URL },
   { name: '04c-empty-home', width: 420, height: 900, records: [], settings: SETTINGS, tabUrl: HOME_URL },

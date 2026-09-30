@@ -226,10 +226,17 @@ function rowDefs() {
     {
       label: `Unit price @ ${settings.targetQty}`,
       key: true,
-      cell: (c, _r, isBest) => {
+      cell: (c, r, isBest) => {
         if (c.unitPrice === null) return html`<span class="muted">no price data</span>`;
         const tag = isBest ? raw('<span class="best-tag">Best</span>') : raw('');
-        return html`<span class="val-num">${formatPrice(c.unitPrice, c.currency)}</span>${tag}`;
+        // A supplier card publishes a RANGE ("US$1,250-4,500"), not a single
+        // price. Ranking uses the low end and the high end is shown next to it,
+        // so the number can never be read as a firm quote.
+        const hi = Number(r.priceTo);
+        const range = Number.isFinite(hi) && hi > c.unitPrice
+          ? html`<div class="muted">up to ${formatPrice(hi, c.currency)}</div>`
+          : raw('');
+        return html`<span class="val-num">${formatPrice(c.unitPrice, c.currency)}</span>${tag}${range}`;
       },
     },
     {
@@ -311,6 +318,33 @@ function rowDefs() {
     {
       label: 'Lead time',
       cell: (_c, r) => (r.leadTime ? html`${r.leadTime}` : html`<span class="muted">—</span>`),
+    },
+    {
+      label: 'Products listed',
+      cell: (_c, r) => {
+        if (!Array.isArray(r.products) || r.products.length === 0) {
+          return html`<span class="muted">—</span>`;
+        }
+        // The cheapest offer is already the unit price above, so what is left is
+        // "the rest of what this factory makes". One product per line, capped,
+        // so a long title cannot run into the next one.
+        const rest = r.products.slice(1, 4);
+        if (rest.length === 0) return html`<span class="muted">nothing else listed</span>`;
+        const lines = rest.map((p) => {
+          const hi = Number(p.to);
+          const range = Number.isFinite(hi) && hi > p.from
+            ? `–${hi.toLocaleString('en-US')}`
+            : '';
+          const title = p.title ? p.title.slice(0, 30) : 'Product';
+          return `<div>${escapeHtml(title)}<span class="muted"> ${escapeHtml(
+            `${p.from.toLocaleString('en-US')}${range}`,
+          )}</span></div>`;
+        });
+        if (r.products.length > rest.length + 1) {
+          lines.push(`<div class="muted">+${r.products.length - rest.length - 1} more</div>`);
+        }
+        return raw(lines.join(''));
+      },
     },
     {
       label: 'Ladder',
@@ -499,10 +533,16 @@ function render() {
     );
   }
   if (result.unpriced.length) {
+    const priced = records.length - result.unpriced.length;
     notes.push(
-      `${result.unpriced.length} supplier${result.unpriced.length > 1 ? 's have' : ' has'} no published price on this page, so ${
-        result.unpriced.length > 1 ? 'they are' : 'it is'
+      `${priced} of ${records.length} supplier${records.length > 1 ? 's publish' : ' publishes'} a price on this page, so ${
+        result.unpriced.length > 1 ? 'the rest are' : 'the other is'
       } shown but not ranked.`,
+    );
+  }
+  if (records.some((r) => Number.isFinite(Number(r.priceTo)) && Number(r.priceTo) > Number(r.priceTiers[0]?.unitPrice))) {
+    notes.push(
+      'Where a supplier publishes a range, the unit price is the low end and the high end is shown under it.',
     );
   }
   if (result.filtered.length) {

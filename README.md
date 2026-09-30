@@ -26,6 +26,10 @@ rest by real cost.
 - **Add a whole results page at once.** On an Alibaba search or supplier-directory page, one press
   adds every supplier currently on screen — name, MOQ, years, verified status, response time,
   on-time delivery, reorder rate and revenue. You do not have to click into 20 product pages first.
+- **Reads the Suppliers tab the way it is actually built.** On the Suppliers tab each card is a
+  *company*, so one card is one comparison row: the company name and flag come from the header, and
+  the prices come from the product tiles on that card (`US$1,250-4,500`). The whole product strip is
+  kept, so you can see what else the factory makes.
 - **Transposed comparison matrix.** Suppliers are columns, fields are rows, so three or more
   suppliers read side by side in the panel without horizontal scrolling.
 - **Real unit-price math.** A target-quantity field drives every price: the correct tier is
@@ -81,6 +85,23 @@ Results pages are different: the cards are built from the DOM and there is no si
 blob, so the results extractor anchors on the product links each card contains, walks up to the
 card that owns the link, and label-scans the text. That survives class-name churn better than a
 fixed selector list, and it means one card holding five products is one supplier, not five.
+
+The two results tabs have genuinely different shapes and are read by different code:
+
+| Tab | Card is | One card means | Price comes from |
+|---|---|---|---|
+| Products | one **offer** | one product row | the card's price-tier box |
+| Suppliers | one **company** | one supplier column | that company's product tiles |
+
+Reading a Suppliers card with the Products strategy is what v1.0 did, and it put `US$5,000` in the
+supplier column (a price-tier box mistaken for a heading) and `US` in the country column (matched
+out of the `US$` of a price). `US$` is a currency, not a country code, and a supplier card has to be
+measured from its header. The Suppliers path now does exactly that.
+
+Alibaba writes USD as `US$`, not `USD`, so the price reader knows the symbol forms (`US$`, `C$`,
+`A$`, `HK$`, `CN¥`, `€`, `£`, `₹`, …) as well as the ISO codes. A published *range*
+(`US$1,250-4,500`) is stored as both ends: the low end ranks the row, the high end is shown beside
+it and exported, because a sheet that shows only the low end quietly misquotes the supplier.
 
 The product reader is built in four fallback layers, so a layout change on Alibaba's side degrades
 gracefully instead of breaking:
@@ -194,9 +215,18 @@ tools/
   panel-preview.mjs          render + screenshot the panel
   verify.mjs                 pre-flight / store-readiness checks
   live-test.mjs              run the real extension against a real Alibaba page
-test/                        83 unit tests
+test/                        93 unit tests
 docs/screenshots/            panel states
 ```
+
+## Version history
+
+| Version | Date | What changed |
+|---|---|---|
+| **2.0.0** | 2026-09-29 | **The Suppliers tab is read correctly.** The company card is now measured from its header (name, flag, badges, credentials) and its prices come from the product tiles, not from the price-tier box. Fixes `US$5,000` appearing as a supplier name and `US` as a country, and the whole page reporting "no published price". New: price ranges kept (`up to X`), the product strip shown in the panel, `Unit price up to` / `Products listed` / `Other products` columns in the export, clearer note about unpriced suppliers. `Response time` keeps its `<` so `<1h` is not flattened to `1h`. |
+| 1.2.0 | 2026-09-29 | Re-scan could not read the page at all. `activeTab` is a single-use grant that does not survive a navigation, so the toolbar click consumed it. Now requests `https://*.alibaba.com/*` host access (still no `tabs`). Verified end to end on a real suppliers search. |
+| 1.1.0 | 2026-09-29 | Fixed the panel appearing to do nothing (capture result is persisted and replayed to the panel) and added support for the Suppliers results page. 82 unit tests. |
+| 1.0.0 | 2026-09-29 | First release: capture, transposed comparison matrix, target-quantity math, filters, TSV/CSV/quote export. |
 
 ## Licence
 

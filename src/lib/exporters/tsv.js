@@ -8,9 +8,20 @@
 
 import { resolveSupplier } from '../compare.js';
 
+/** True when a record publishes a range, i.e. the high end means something. */
+const isHigher = (r) =>
+  Number.isFinite(Number(r.priceTo)) &&
+  Number(r.priceTo) > Number(r.priceTiers?.[0]?.unitPrice);
+
+const isHigherOffer = (p) => Number.isFinite(Number(p.to)) && Number(p.to) > Number(p.from);
+
 /**
  * Column order is the contract. Appending a column is backwards compatible;
  * renaming or reordering is not.
+ *
+ * v2.0 inserted the range and product-strip columns directly after the unit
+ * price, because a supplier publishes "US$1,250-4,500" and a sheet that only
+ * ever shows the low end quietly misquotes it.
  *
  * `get` receives (ctx, record) where ctx = { resolved, settings, targetQty }.
  */
@@ -21,9 +32,18 @@ const COLUMNS = [
   { label: 'Business type', get: (c, r) => r.businessType },
   { label: 'Currency', get: (c, r) => r.currency },
   { label: 'Unit price at Qty', get: (c) => c.unitPrice ?? '' },
+  { label: 'Unit price up to', get: (c, r) => (c.unitPrice !== null && isHigher(r) ? r.priceTo : '') },
   { label: 'Target qty', get: (c, r) => c.targetQty ?? '' },
   { label: 'Order qty used', get: (c) => c.orderQty ?? '' },
   { label: 'Total', get: (c) => c.total ?? '' },
+  { label: 'Products listed', get: (_c, r) => (Array.isArray(r.products) ? r.products.length : 0) },
+  {
+    label: 'Other products',
+    get: (_c, r) =>
+      (Array.isArray(r.products) ? r.products.slice(1) : [])
+        .map((p) => `${p.title} ${p.from}${isHigherOffer(p) ? '-' + p.to : ''}`)
+        .join(' | '),
+  },
   { label: 'MOQ', get: (c, r) => r.moqQty ?? '' },
   { label: 'MOQ unit', get: (c, r) => r.moqUnit },
   { label: 'Below MOQ at target', get: (c) => (c.belowMoq ? 'YES' : 'no') },

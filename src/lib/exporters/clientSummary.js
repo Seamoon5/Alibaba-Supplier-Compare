@@ -67,6 +67,12 @@ export const clientSummary = {
           out.push(`   Type          : ${r.businessType}${isManufacturer(r.businessType) ? '  [factory]' : ''}`);
         }
         out.push(`   Unit price    : ${formatPrice(c.unitPrice, currency)}`);
+        if (Number.isFinite(Number(r.priceTo)) && Number(r.priceTo) > c.unitPrice) {
+          out.push(`   Price range  : ${formatPrice(c.unitPrice, currency)} – ${formatPrice(r.priceTo, currency)}`);
+        }
+        if (Array.isArray(r.products) && r.products.length > 1) {
+          out.push(`   Also lists   : ${r.products.length - 1} other product${r.products.length - 2 === 1 ? '' : 's'}`);
+        }
         if (c.belowMoq) {
           out.push(`   Note          : quantity of ${qty} is below this supplier's minimum`);
           out.push(`                   order of ${r.moqQty}${r.moqUnit ? ' ' + r.moqUnit : ''}.`);

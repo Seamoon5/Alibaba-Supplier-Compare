@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  makeRecord, normalizeTiers, normalizeTier, recordKey,
+  makeRecord, normalizeTiers, normalizeTier, normalizeOffers, recordKey,
   PROVENANCE, CORE_FIELDS,
 } from '../src/lib/schema.js';
 import {
@@ -254,4 +254,83 @@ test('a supplier with missing data is labelled in the export rather than blank',
   const missing = cells[header.split('\t').indexOf('Missing fields')];
   assert.ok(missing.includes('priceTiers'), 'the missing field names are listed');
   assert.ok(missing.includes('moqQty'));
+});
+
+// ------------------------------------------------------- published price ranges
+// A supplier card publishes "US$1,250-4,500", not a single price. Dropping the
+// high end would make the sheet quote a figure the supplier never offered.
+
+test('normalizeOffers sorts cheapest first, drops junk and caps the strip', () => {
+  const r = makeRecord({
+    productId: 'range1',
+    companyName: 'Range Co',
+    origin: 'search',
+    priceTiers: [{ minQty: 1, unitPrice: 1250 }],
+    priceTo: 4500,
+    products: [
+      { title: 'B', from: '6900', to: '7,200' },
+      { title: 'A', from: '1,250', to: '4,500' },
+      { title: 'Broken', from: 'none' },
+      { title: 'Backwards', from: '900', to: '100' },
+      null,
+      { title: 'C', from: 2000 }, { title: 'D', from: 3000 }, { title: 'E', from: 4000 },
+      { title: 'F', from: 5000 }, { title: 'G', from: 6000 },
+    ],
+  });
+
+  assert.equal(r.products.length, 6, 'capped so one supplier cannot flood the column');
+  assert.equal(r.products[0].from, 900, 'cheapest offer first');
+  assert.equal(r.products[1].title, 'A');
+  assert.equal(r.products[1].from, 1250);
+  assert.equal(r.products[1].to, 4500);
+  assert.equal(r.products.find((p) => p.title === 'Backwards').to, null,
+    'a range that runs backwards is stored as a single price');
+  assert.ok(!r.products.some((p) => p.title === 'Broken'));
+  assert.ok(!r.products.some((p) => p.title === 'B') && !r.products.some((p) => p.title === 'G'),
+    'the cap drops the dearest offers, not an arbitrary tail');
+  assert.equal(r.priceTo, 4500);
+});
+
+test('the Sheets export carries the high end of the range and the product strip', () => {
+  const supplier = makeRecord({
+    productId: 'range2',
+    companyName: 'Zhuji Yuanheng',
+    country: 'CN',
+    currency: 'USD',
+    origin: 'search',
+    moqQty: 1,
+    priceTiers: [{ minQty: 1, unitPrice: 1250 }],
+    priceTo: 4500,
+    products: [
+      { title: 'DISEN Large Format', from: 1250, to: 4500, currency: 'USD' },
+      { title: 'Commercial logo Hat', from: 6900, to: 7200, currency: 'USD' },
+    ],
+  });
+
+  const rows = getExporter('tsv').build([supplier], { targetQty: 1 }).split('\n');
+  const header = rows[0].split('\t');
+  const idx = (name) => header.indexOf(name);
+  const row = rows[1].split('\t');
+
+  assert.ok(idx('Unit price up to') > -1, 'the range high end has a column');
+  assert.equal(row[idx('Unit price at Qty')], '1250');
+  assert.equal(row[idx('Unit price up to')], '4500');
+  assert.equal(row[idx('Supplier')], 'Zhuji Yuanheng');
+  assert.equal(row[idx('Country')], 'CN');
+  assert.equal(row[idx('Products listed')], '2');
+  assert.equal(row[idx('Other products')], 'Commercial logo Hat 6900-7200');
+});
+
+test('a single-price supplier leaves the range column empty rather than repeating itself', () => {
+  const flat = makeRecord({
+    productId: 'flat1',
+    companyName: 'Flat Co',
+    origin: 'search',
+    moqQty: 1,
+    currency: 'USD',
+    priceTiers: [{ minQty: 1, unitPrice: 12.5 }],
+  });
+  const rows = getExporter('tsv').build([flat], { targetQty: 1 }).split('\n');
+  const header = rows[0].split('\t');
+  assert.equal(rows[1].split('\t')[header.indexOf('Unit price up to')], '');
 });
