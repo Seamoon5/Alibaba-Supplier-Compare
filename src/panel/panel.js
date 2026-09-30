@@ -521,7 +521,12 @@ function render() {
     settings.hideBelowMoq ? 'Hide below-MOQ' : '',
     settings.hideLowConfidence ? 'Hide partial data' : '',
   ].filter(Boolean);
-  el.fxFilters.textContent = active.length ? `Filters on: ${active.join(' · ')}` : '';
+  // The filters are also the reason the matrix can be empty while the data is
+  // all there, so this line carries a button that turns them all off. "Open
+  // Filters" is not an answer a tired person at midnight wants.
+  el.fxFilters.innerHTML = active.length
+    ? `Filters on: ${active.join(' · ')} <button class="link-btn" id="btnShowAll" type="button">show all suppliers</button>`
+    : '';
   el.fxFilters.hidden = active.length === 0;
 
   el.matrixHead.innerHTML = `<tr><th class="col-label">Supplier</th>${all
@@ -594,8 +599,7 @@ function render() {
     if (settings.hideBelowMoq) on.push('hide below-MOQ');
     if (settings.hideLowConfidence) on.push('hide partial data');
     notes.push(
-      `${result.filtered.length} hidden by ${on.length ? on.join(' + ') : 'a filter'} — `
-      + 'open Filters to turn it off.',
+      `${result.filtered.length} hidden by ${on.length ? on.join(' + ') : 'a filter'}.`,
     );
   }
   if (result.totalShown === 0 && result.unpriced.length === 0 && records.length > 0) {
@@ -629,6 +633,20 @@ el.qty.addEventListener('input', () => {
     render();
     await send('SET_SETTINGS', { patch: { targetQty: n } });
   }, 200);
+});
+
+// One click clears every filter, both in the checkboxes and in storage, so the
+// panel can never be left showing nothing because of a filter nobody can see.
+el.fxFilters.addEventListener('click', async (e) => {
+  if (!e.target.closest('#btnShowAll')) return;
+  const patch = { verifiedOnly: false, manufacturersOnly: false, hideBelowMoq: false, hideLowConfidence: false };
+  el.fVerified.checked = false;
+  el.fManufacturers.checked = false;
+  el.fBelowMoq.checked = false;
+  el.fLowConf.checked = false;
+  Object.assign(settings, patch);
+  render();
+  await send('SET_SETTINGS', { patch });
 });
 
 for (const [node, key] of [

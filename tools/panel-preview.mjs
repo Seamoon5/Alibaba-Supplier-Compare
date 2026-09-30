@@ -257,10 +257,16 @@ const SCENARIOS = [
     expectVisible: REAL_CAPTURE.length,
   },
   {
-    // One saved filter is on: the panel must SAY which, not just hide rows.
+    // Filters that were left on from an earlier session: the panel must name
+    // them, say how many rows they hide, and offer one click to clear them.
     name: '03e-real-capture-filter-on', width: 540, height: 760,
-    records: REAL_CAPTURE, settings: { targetQty: 100, manufacturersOnly: true },
-    expectVisible: 1, expectColumns: REAL_CAPTURE.filter((r) => r.businessType === 'Manufacturer').length,
+    records: REAL_CAPTURE, settings: { targetQty: 100, manufacturersOnly: true, verifiedOnly: true },
+    // This is exactly the state that made the panel look broken: the data is
+    // all there, but two filters nobody could see removed every row. The escape
+    // hatch and the count are what matter here, not the column count.
+    expectColumns: REAL_CAPTURE.filter(
+      (r) => r.businessType === 'Manufacturer' && r.verifiedSupplier === true,
+    ).length,
   },
   { name: '04-empty-unknown', width: 420, height: 900, records: [], settings: SETTINGS, tabUrl: OFFSITE_URL },
   { name: '04b-empty-search', width: 420, height: 900, records: [], settings: SETTINGS, tabUrl: SEARCH_URL },
@@ -351,6 +357,9 @@ for (const s of SCENARIOS) {
         : document.getElementById('ctxNote').textContent.trim(),
       note: document.getElementById('fxNote').hidden
         ? null : document.getElementById('fxNote').textContent.trim(),
+      filterNote: document.getElementById('fxFilters').hidden
+        ? null : document.getElementById('fxFilters').textContent.trim(),
+      showAllBtn: Boolean(document.querySelector('#btnShowAll')),
       rowLabels: [...document.querySelectorAll('.matrix tbody th')].map((t) => t.textContent.trim()),
     };
   });
@@ -389,6 +398,9 @@ for (const s of SCENARIOS) {
     if (s.expectVisible && facts.fullyVisibleColumns < s.expectVisible) {
       problems.push(`${s.name}: only ${facts.fullyVisibleColumns} of ${facts.supplierColumns} supplier columns fit on screen, expected at least ${s.expectVisible}`);
     }
+  }
+  if (facts.supplierColumns < s.records.length && facts.filterNote && !facts.showAllBtn) {
+    problems.push(`${s.name}: rows are hidden but there is no one-click way to see them`);
   }
   if (s.name === '01-matrix-2qty') {
     console.log('   price row :', facts.firstPrice);
