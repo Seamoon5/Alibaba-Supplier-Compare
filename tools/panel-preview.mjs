@@ -147,6 +147,20 @@ const SUPPLIER_RECORDS = [
   },
 ];
 
+/** The real thing: whatever tools/real-page-test.mjs last extracted from a
+ *  saved Alibaba page, put through the same record pipeline the extension uses.
+ *  No invented fixture — if the extractor breaks, this panel breaks visibly. */
+const REAL_CAPTURE = (() => {
+  try {
+    const raw = JSON.parse(readFileSync(join(root, 'docs', 'fixtures', 'real-capture-sample.json'), 'utf8'));
+    return raw.candidates.slice(0, 6).map((c) => ({
+      ...c, origin: 'search', capturedAt: new Date().toISOString(),
+    }));
+  } catch {
+    return [];
+  }
+})();
+
 const SETTINGS = { targetQty: 2 };
 
 /** Rows as a Suppliers results page produces them: no price ladder. */
@@ -237,6 +251,17 @@ const SCENARIOS = [
   { name: '03-matrix-wide', width: 900, height: 700, records: RECORDS, settings: { targetQty: 5 }, expectVisible: 3 },
   { name: '03b-matrix-search-origin', width: 420, height: 900, records: SEARCH_RECORDS, settings: SETTINGS, expectVisible: 3 },
   { name: '03c-matrix-supplier-card', width: 460, height: 1100, records: SUPPLIER_RECORDS, settings: { targetQty: 1 }, expectVisible: 3 },
+  {
+    name: '03d-matrix-real-capture', width: 900, height: 1250,
+    records: REAL_CAPTURE, settings: { targetQty: 100 },
+    expectVisible: REAL_CAPTURE.length,
+  },
+  {
+    // One saved filter is on: the panel must SAY which, not just hide rows.
+    name: '03e-real-capture-filter-on', width: 540, height: 760,
+    records: REAL_CAPTURE, settings: { targetQty: 100, manufacturersOnly: true },
+    expectVisible: 1, expectColumns: REAL_CAPTURE.filter((r) => r.businessType === 'Manufacturer').length,
+  },
   { name: '04-empty-unknown', width: 420, height: 900, records: [], settings: SETTINGS, tabUrl: OFFSITE_URL },
   { name: '04b-empty-search', width: 420, height: 900, records: [], settings: SETTINGS, tabUrl: SEARCH_URL },
   { name: '04c-empty-home', width: 420, height: 900, records: [], settings: SETTINGS, tabUrl: HOME_URL },
@@ -351,10 +376,15 @@ for (const s of SCENARIOS) {
   } else {
     if (!facts.matrixVisible) problems.push(`${s.name}: matrix not shown`);
     if (!facts.footerVisible) problems.push(`${s.name}: footer not shown`);
-    if (facts.supplierColumns !== s.records.length) {
-      problems.push(`${s.name}: expected ${s.records.length} supplier columns, got ${facts.supplierColumns}`);
+    const expectedCols = s.expectColumns ?? s.records.length;
+    if (facts.supplierColumns !== expectedCols) {
+      problems.push(`${s.name}: expected ${expectedCols} supplier columns, got ${facts.supplierColumns}`);
     }
-    if (!facts.bestTagged) problems.push(`${s.name}: no best-price marker`);
+    // A scenario may legitimately show no best marker when a filter removes the
+    // cheapest row, so only assert it where the cheapest row is still visible.
+    if (facts.supplierColumns > 1 && !facts.bestTagged) {
+      problems.push(`${s.name}: no best-price marker`);
+    }
     if (facts.horizontalOverflow) problems.push(`${s.name}: panel scrolls horizontally (${facts.pageScrollWidth} > ${facts.clientWidth})`);
     if (s.expectVisible && facts.fullyVisibleColumns < s.expectVisible) {
       problems.push(`${s.name}: only ${facts.fullyVisibleColumns} of ${facts.supplierColumns} supplier columns fit on screen, expected at least ${s.expectVisible}`);

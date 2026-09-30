@@ -30,6 +30,7 @@ const el = {
   empty: $('empty'),
   wrap: $('wrap'),
   fxNote: $('fxNote'),
+  fxFilters: $('fxFilters'),
   matrixHead: $('matrixHead'),
   matrixBody: $('matrixBody'),
   ftr: $('ftr'),
@@ -291,7 +292,35 @@ function rowDefs() {
     },
     {
       label: 'Country',
-      cell: (_c, r) => (r.country ? html`${r.country}` : html`<span class="muted">—</span>`),
+      cell: (_c, r) => {
+        if (!r.country) return html`<span class="muted">—</span>`;
+        return r.province
+          ? html`${r.country}<div class="muted">${r.province}</div>`
+          : html`${r.country}`;
+      },
+    },
+    {
+      label: 'Rating',
+      cell: (_c, r) => {
+        if (!Number.isFinite(r.rating)) return html`<span class="muted">—</span>`;
+        const n = r.reviewCount;
+        return html`<span class="val-num">${r.rating}/5</span>${
+          Number.isFinite(n) ? html`<div class="muted">${n} review${n === 1 ? '' : 's'}</div>` : raw('')
+        }`;
+      },
+    },
+    {
+      label: 'Main products',
+      cell: (_c, r) => {
+        if (!Array.isArray(r.mainProducts) || r.mainProducts.length === 0) {
+          return html`<span class="muted">—</span>`;
+        }
+        const items = r.mainProducts.slice(0, 4)
+          .map((m) => `<div>${escapeHtml(m.slice(0, 34))}</div>`).join('');
+        const more = r.mainProducts.length > 4
+          ? `<div class="muted">+${r.mainProducts.length - 4} more</div>` : '';
+        return raw(items + more);
+      },
     },
     {
       label: 'Response',
@@ -484,6 +513,17 @@ function render() {
   const all = cols;
   const multi = result.groups.length > 1;
 
+  // A running count of active filters sits next to the results, so a panel that
+  // looks empty always explains itself.
+  const active = [
+    settings.verifiedOnly ? 'Verified only' : '',
+    settings.manufacturersOnly ? 'Factories only' : '',
+    settings.hideBelowMoq ? 'Hide below-MOQ' : '',
+    settings.hideLowConfidence ? 'Hide partial data' : '',
+  ].filter(Boolean);
+  el.fxFilters.textContent = active.length ? `Filters on: ${active.join(' · ')}` : '';
+  el.fxFilters.hidden = active.length === 0;
+
   el.matrixHead.innerHTML = `<tr><th class="col-label">Supplier</th>${all
     .map((c) => {
       const r = c.resolved.record;
@@ -546,7 +586,17 @@ function render() {
     );
   }
   if (result.filtered.length) {
-    notes.push(`${result.filtered.length} hidden by the current filters.`);
+    // Never say "hidden by the current filters" without saying WHICH ones. A
+    // saved filter that is on but invisible is indistinguishable from a bug.
+    const on = [];
+    if (settings.verifiedOnly) on.push('verified suppliers only');
+    if (settings.manufacturersOnly) on.push('factories only');
+    if (settings.hideBelowMoq) on.push('hide below-MOQ');
+    if (settings.hideLowConfidence) on.push('hide partial data');
+    notes.push(
+      `${result.filtered.length} hidden by ${on.length ? on.join(' + ') : 'a filter'} — `
+      + 'open Filters to turn it off.',
+    );
   }
   if (result.totalShown === 0 && result.unpriced.length === 0 && records.length > 0) {
     notes.push('No supplier matches the current quantity and filters.');

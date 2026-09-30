@@ -40,7 +40,11 @@ export const FIELD_LABELS = {
   tradeAssurance: 'Trade Assurance',
   businessType: 'Business type',
   country: 'Country',
+  province: 'Province',
   currency: 'Currency',
+  rating: 'Rating',
+  reviewCount: 'Reviews',
+  mainProducts: 'Main products',
   responseRate: 'Response time',
   onTimeDelivery: 'On-time delivery',
   reorderRate: 'Reorder rate',
@@ -72,6 +76,33 @@ function pct(v) {
   if (n === null) return null;
   if (n < 0 || n > 100) return null;
   return n;
+}
+
+/** Alibaba prints a rating out of five ("4.8/5"). Keep 0..5, one decimal. */
+function ratingOf(v) {
+  const n = toNum(v);
+  if (n === null || n <= 0 || n > 5) return null;
+  return Math.round(n * 10) / 10;
+}
+
+/** A review count is a plain integer; anything else is not a count. */
+function countOf(v) {
+  const n = toNum(v);
+  if (n === null || n < 0 || n > 1000000) return null;
+  return Math.round(n);
+}
+
+/** The supplier's own "Main products" bullets, capped and de-duplicated. */
+function mainProductsOf(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const row of v) {
+    const t = str(row);
+    if (!t || t.length > 80 || out.indexOf(t) !== -1) continue;
+    out.push(t);
+    if (out.length >= 5) break;
+  }
+  return out;
 }
 
 /** Normalise one price tier into { minQty, maxQty, unitPrice }. maxQty null = open ended. */
@@ -129,6 +160,11 @@ export function normalizeOffers(raw) {
       to,
       currency: str(row.currency) || 'USD',
       url: str(row.url),
+      // Each product carries its own minimum. One supplier's products can differ
+      // wildly (2 pieces on one line, 500 on the next), and the buyer's order
+      // has to respect the minimum of the product they actually chose.
+      moqQty: (() => { const q = toNum(row.moqQty); return q !== null && q >= 0 ? q : null; })(),
+      moqUnit: str(row.moqUnit),
     });
   }
   // Sort before capping, so a cap can only ever drop the most expensive offers
@@ -151,7 +187,11 @@ export function makeRecord(input = {}) {
     companyName: str(input.companyName),
     companyUrl: str(input.companyUrl),
     country: str(input.country),
+    province: str(input.province),
     businessType: str(input.businessType),
+    rating: ratingOf(input.rating),
+    reviewCount: countOf(input.reviewCount),
+    mainProducts: mainProductsOf(input.mainProducts),
     currency: str(input.currency) || 'USD',
     image: str(input.image),
 

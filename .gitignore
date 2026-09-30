@@ -1,3 +1,7 @@
 node_modules/
 *.log
 .DS_Store
+
+# Output of tools/real-page-test.mjs: a dump of whatever the last real capture
+# found. Regenerated on demand, and it holds live page data, so it is not code.
+docs/last-real-capture.json

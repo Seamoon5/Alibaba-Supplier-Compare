@@ -45,7 +45,10 @@ rest by real cost.
   **formatted quote summary** for sending to a client or your team.
 - **Currency-safe.** Suppliers quoting in different currencies are ranked in separate groups, never
   against each other, because a stale exchange rate would produce a confidently wrong winner.
-- **Filters** for verified suppliers, factories only, below-MOQ, and partial data.
+- **Filters** for verified suppliers, factories only, below-MOQ, and partial data. Active
+  filters are always named above the comparison, so a panel that looks empty explains itself.
+- **Sourcing facts Alibaba actually prints**: rating and review count, province, factory vs
+  trading company from Alibaba's own flag, and the supplier's "Main products" list.
 
 ## Install
 
@@ -93,15 +96,47 @@ The two results tabs have genuinely different shapes and are read by different c
 | Products | one **offer** | one product row | the card's price-tier box |
 | Suppliers | one **company** | one supplier column | that company's product tiles |
 
-Reading a Suppliers card with the Products strategy is what v1.0 did, and it put `US$5,000` in the
-supplier column (a price-tier box mistaken for a heading) and `US` in the country column (matched
-out of the `US$` of a price). `US$` is a currency, not a country code, and a supplier card has to be
-measured from its header. The Suppliers path now does exactly that.
+Alibaba rebuilds this page with **hashed class names** (`CawI5`, `TMl6f`, `f3wvg`) that
+change per deploy, so nothing here matches on a class. What stays stable is the semantics:
+
+| What | Selector that carries it |
+|---|---|
+| the card | `[data-supplier-card="true"]` |
+| company id, factory flag, product ids | `data-dot-params` (JSON) |
+| company name | the first `span[title]` that is not inside a product tile |
+| country | `img[alt="countryFlag"]`, code in the next sibling, province in the previous |
+| years on platform | `[data-supplier-card-gold-years]` |
+| rating and review count | `.../5` text and `[data-supplier-card-reviews]` |
+| each product, its price and its MOQ | `a[data-supplier-card-product]` |
+
+Reading the Suppliers tab with the Products strategy is what broke v1.0: a price-tier box
+became the supplier name (`US$5,000`), the country came out of the `US$` of a price (`US`),
+and the whole page reported "no published price". A label-only fallback still runs when
+`data-supplier-card` is absent, so a redesign degrades instead of emptying.
 
 Alibaba writes USD as `US$`, not `USD`, so the price reader knows the symbol forms (`US$`, `C$`,
 `A$`, `HK$`, `CN¥`, `€`, `£`, `₹`, …) as well as the ISO codes. A published *range*
 (`US$1,250-4,500`) is stored as both ends: the low end ranks the row, the high end is shown beside
 it and exported, because a sheet that shows only the low end quietly misquotes the supplier.
+
+Each product on a supplier card carries its own minimum order — 2 pieces on one line, 500 on the
+next — so the MOQ reported is the one belonging to the product actually being priced.
+
+### Testing against a real page
+
+`npm test` proves the code does what it was written to do. It cannot prove Alibaba still renders
+the page that way, and three broken versions of this extension came from guessing at that. So:
+
+```bash
+# 1. Save a live page: open a suppliers search, press Ctrl+S, press Enter.
+# 2. Run the shipped extractor against that saved HTML in a real browser:
+npm run test:real
+```
+
+It prints every supplier it found with its country, factory flag, rating, price range, MOQ and
+product count, and fails if any row is missing a name or a country. The capture it writes to
+`docs/fixtures/real-capture-sample.json` feeds `npm run preview`, so the panel screenshots in
+`docs/screenshots/` are rendered from **real extracted data**, not invented fixtures.
 
 The product reader is built in four fallback layers, so a layout change on Alibaba's side degrades
 gracefully instead of breaking:
@@ -214,15 +249,18 @@ tools/
   diagnostics.html           offline extractor test harness
   panel-preview.mjs          render + screenshot the panel
   verify.mjs                 pre-flight / store-readiness checks
-  live-test.mjs              run the real extension against a real Alibaba page
-test/                        93 unit tests
-docs/screenshots/            panel states
+  live-test.mjs              run the real extension against a live Alibaba page
+  real-page-test.mjs         run the extractor against a page you saved (Ctrl+S)
+test/                        90 unit tests
+docs/screenshots/            panel states, rendered from a real capture
+docs/fixtures/              a real capture, committed so previews are never invented
 ```
 
 ## Version history
 
 | Version | Date | What changed |
 |---|---|---|
+| **2.1.0** | 2026-09-30 | **Rewritten against a real saved page.** The Suppliers tab is marked up with hashed class names and was being read by guesswork. Now every field comes from a stable signal: `data-supplier-card`, `data-dot-params` (company id + Alibaba's own factory flag), `span[title]` for the name, `img[alt="countryFlag]` for the country and province, `data-supplier-card-gold-years`, `data-supplier-card-reviews`, `a[data-supplier-card-product]` for each product's price and its own MOQ. Adds rating, review count, province and Main products to the panel and the export. New `npm run test:real` runs the shipped extractor against a page you saved with Ctrl+S, in a real browser, and fails if any supplier comes back without a name or a country; its capture renders the panel screenshots. The panel now names the active filters instead of saying "hidden by the current filters". Fixed: a card with no `title` attribute lost its name because the fallback reader was handed a pipe-joined string instead of the card text; `<1k` revenue was dropped because the reader had no comparator; product offers were lost on layouts without product-tile markers. |
 | **2.0.0** | 2026-09-29 | **The Suppliers tab is read correctly.** The company card is now measured from its header (name, flag, badges, credentials) and its prices come from the product tiles, not from the price-tier box. Fixes `US$5,000` appearing as a supplier name and `US` as a country, and the whole page reporting "no published price". New: price ranges kept (`up to X`), the product strip shown in the panel, `Unit price up to` / `Products listed` / `Other products` columns in the export, clearer note about unpriced suppliers. `Response time` keeps its `<` so `<1h` is not flattened to `1h`. |
 | 1.2.0 | 2026-09-29 | Re-scan could not read the page at all. `activeTab` is a single-use grant that does not survive a navigation, so the toolbar click consumed it. Now requests `https://*.alibaba.com/*` host access (still no `tabs`). Verified end to end on a real suppliers search. |
 | 1.1.0 | 2026-09-29 | Fixed the panel appearing to do nothing (capture result is persisted and replayed to the panel) and added support for the Suppliers results page. 82 unit tests. |

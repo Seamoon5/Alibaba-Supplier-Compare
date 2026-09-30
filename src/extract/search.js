@@ -143,9 +143,11 @@ export function harvestSearchPage() {
     var response = rm ? clean(rm[1] || '') + clean(rm[2]) : '';
     // Online revenue is a range such as "$50K - $100K". Stop at the label that
     // follows it rather than swallowing it.
+    // Revenue is a range ("$1M - $2M") or an open bound ("<1k"). The leading
+    // comparator is part of the published fact and must survive.
     var revenue = grab(
       body,
-      /online\s*revenue\s*:?\s*(\$?\s?[\d.,]+\s*[KM]?\s*(?:[-–—]\s*\$?\s?[\d.,]+\s*[KM]?)?)/i
+      /online\s*revenue\s*:?\s*([<>≤≥]?\s*\$?\s?[\d.,]+\s*[KM]?\s*(?:[-–—]\s*\$?\s?[\d.,]+\s*[KM]?)?)/i
     );
     return {
       onTimeDelivery: onTime !== null ? Number(onTime) : null,
@@ -162,35 +164,161 @@ export function harvestSearchPage() {
   }
 
   // ============================================================ SUPPLIERS TAB
-  // One card per company. The card owns a header (name, flag, badges) and a
-  // strip of product tiles, each with its own price.
+  // One card per COMPANY. Every selector below is a data attribute or an alt
+  // text, never a class name: Alibaba's classes are hashed per deploy
+  // (CawI5, TMl6f, f3wvg) and change without warning, while these do not.
+  //
+  //   [data-supplier-card="true"]              the card
+  //   data-dot-params                            JSON: companyId, isFactory, ...
+  //   span[title]                                the company name
+  //   img[alt="countryFlag"] + next sibling      the country code ("PK")
+  //   [data-supplier-card-gold-years]            "2 yrs"
+  //   [data-supplier-card-reviews]               "(52 reviews)"
+  //   a[data-supplier-card-product]              one of the supplier's products
+  //
+  // Everything is still read from visible text as well, so a card that renders
+  // differently yields whatever it does publish rather than nothing at all.
+
+  var CARD_SEL = '[data-supplier-card="true"]';
+  var TILE_SEL = 'a[data-supplier-card-product], [data-supplier-card-product]';
   var PRODUCT_SEL = 'a[href*="/product-detail/"], a[href*="showproduct.html"]';
-  var COMPANY_SEL =
-    'a[href*="/company/"], a[href*="company-detail"], a[href*="/showcompany"], ' +
-    'a[href*="/supplier/"], a[href*="/company-profile"]';
 
-  function productLinksWithin(root) {
-    return Array.prototype.slice.call(root.querySelectorAll(PRODUCT_SEL)).filter(isVisible);
-  }
-
-  /** The smallest ancestor that owns this company's products: one card, one row. */
-  function supplierCardFor(companyLink, claimed) {
-    var node = companyLink;
-    for (var i = 0; i < 10 && node && node !== document.body; i++) {
-      node = node.parentElement;
-      if (!node) return null;
-      if (claimed.indexOf(node) !== -1) return null;
-      if (node.querySelectorAll(COMPANY_SEL).length > 2) return null; // hit the list
-      var t = text(node);
-      if (!t || t.length > 9000) continue;
-      if (productLinksWithin(node).length > 0) return node;
+  function all(root, sel) {
+    try {
+      return Array.prototype.slice.call(root.querySelectorAll(sel));
+    } catch (e) {
+      return [];
     }
-    return null;
   }
 
-  /** Fallback when the company name is not a link: find the card by its metrics. */
+  /** JSON in an attribute, decoded. Never throws: a card must still parse. */
+  function params(el) {
+    try {
+      return JSON.parse(el.getAttribute('data-dot-params') || '{}') || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  /** True when the element sits inside one of the card's product tiles. */
+  function inProductTile(el, card) {
+    var node = el;
+    for (var i = 0; i < 6 && node && node !== card; i++) {
+      if (node.getAttribute && node.getAttribute('data-supplier-card-product') !== null) return true;
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  /**
+   * The company name is the first titled element that is not a product tile.
+   * Alibaba renders it as <span title="al jannat caps">, and the product tiles
+   * below carry no title of their own, so document order alone is enough.
+   */
+  function nameFromHeader(card) {
+    var titled = all(card, '[title]');
+    for (var i = 0; i < titled.length; i++) {
+      var el = titled[i];
+      if (inProductTile(el, card)) continue;
+      var t = clean(el.getAttribute('title') || text(el));
+      if (t.length < 3 || t.length > 90) continue;
+      if (/(min\.?\s*order|response|revenue|on-?time|reorder|verified|\b\d{1,2}\s*(?:\+?\s*)?(?:yr|yrs|year|years)\b|pieces|units|sets|review|requirements|rating)/i.test(t)) continue;
+      return t;
+    }
+    return '';
+  }
+
+  /**
+   * Country and province, read off the flag: the element before it is the
+   * province ("Sindh,") and the element after it is the code ("PK"). Guessing
+   * from the card text instead would keep tripping over "US" inside "US$".
+   */
+  function countryFromCard(card, headerText, body) {
+    var flag = all(card, 'img[alt="countryFlag"]')[0];
+    if (flag) {
+      var code = clean(text(flag.nextElementSibling));
+      var province = clean(text(flag.previousElementSibling)).replace(/,$/, '');
+      if (/^[A-Za-z]{2,3}$/.test(code)) {
+        return { country: code.toUpperCase(), province: province || '' };
+      }
+    }
+    return { country: findCountry(headerText) || findCountry(body), province: '' };
+  }
+
+  function yearsFromCard(card, body) {
+    var el = all(card, '[data-supplier-card-gold-years]')[0];
+    var from = grab(text(el), /(\d{1,2})\s*\+?\s*(?:yr|yrs|year|years)\b/i);
+    if (from === null) from = grab(body, /(\d{1,2})\s*\+?\s*(?:yr|yrs|year|years)\b/i);
+    return from === null ? null : Number(from);
+  }
+
+  function ratingFromCard(card, headerText, body) {
+    var m = String(headerText).match(/(\d(?:\.\d)?)\s*\/\s*5/) ||
+      String(body).match(/(\d(?:\.\d)?)\s*\/\s*5/);
+    return m ? Number(m[1]) : null;
+  }
+
+  function reviewsFromCard(card, body) {
+    var el = all(card, '[data-supplier-card-reviews]')[0];
+    var src = text(el) || String(body);
+    var m = String(src).match(/([\d][\d,.]*)\s*(?:reviews?|ratings?)/i);
+    if (!m) return null;
+    var n = num(m[1]);
+    return n === null ? null : Math.round(n);
+  }
+
+  /**
+   * "Main products" is a labelled bullet list of what the factory actually
+   * makes. It is the most useful free text on the card, and unlike the product
+   * tile it carries real names rather than a URL slug.
+   */
+  function mainProductsFrom(card) {
+    var out = [];
+    var label = null;
+    var candidates = all(card, 'div, span, p, h1, h2, h3, h4');
+    for (var i = 0; i < candidates.length; i++) {
+      if (/^main\s*products?$/i.test(text(candidates[i]))) {
+        label = candidates[i];
+        break;
+      }
+    }
+    var host = label && label.parentElement ? label.parentElement : card;
+    var titled = all(host, '[title]');
+    for (var j = 0; j < titled.length && out.length < 5; j++) {
+      var el = titled[j];
+      if (inProductTile(el, card)) continue;
+      var t = clean(el.getAttribute('title') || text(el));
+      if (t.length < 2 || t.length > 60) continue;
+      if (out.indexOf(t) === -1) out.push(t);
+    }
+    return out;
+  }
+
+  /**
+   * Alibaba's product URLs carry a readable slug:
+   *   /product-detail/Premium-Quality-Factory-Made-Round-Fashion_10000037271758.html
+   * That slug is a lowercased product title, which beats showing a bare id when
+   * the card offers no title text at all.
+   */
+  function titleFromProductUrl(href) {
+    var m = String(href || '').match(/\/product-detail\/([^_?]+)_\d+\.html/i);
+    if (!m) return '';
+    var words = decodeURIComponent(m[1]).replace(/[-_+]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return words.length > 1 ? words : '';
+  }
+
+  function collectSupplierCards() {
+    var cards = all(document, CARD_SEL).filter(function (el) {
+      return isVisible(el);
+    });
+    if (cards.length > 0) return cards;
+    // Older layout: no data attribute, so fall back to label-based detection.
+    return supplierCardsFromProductLinks().map(function (e) { return e.card; });
+  }
+
+  /** Fallback: find a supplier card by the labels it prints, not by markup. */
   function supplierCardsFromProductLinks() {
-    var links = Array.prototype.slice.call(document.querySelectorAll(PRODUCT_SEL)).filter(isVisible);
+    var links = all(document, PRODUCT_SEL).filter(isVisible);
     var claimed = [];
     var cards = [];
     for (var i = 0; i < links.length; i++) {
@@ -209,10 +337,10 @@ export function harvestSearchPage() {
         if (/\b\d{1,2}\s*\+?\s*(?:yr|yrs|year|years)\b/i.test(t)) hints++;
         if (/min\.?\s*order/i.test(t)) hints++;
         if (NAME_RE.test(t) || CODE_RE.test(t)) hints++;
-        var products = node.querySelectorAll(PRODUCT_SEL).length;
+        var products = all(node, PRODUCT_SEL).length;
         if (hints >= 2 && products >= 1) {
           claimed.push(node);
-          cards.push({ card: node, companyLink: null, link: links[i] });
+          cards.push({ card: node, link: links[i] });
           break;
         }
       }
@@ -220,38 +348,18 @@ export function harvestSearchPage() {
     return cards;
   }
 
-  function collectSupplierCards() {
-    var claimed = [];
-    var cards = [];
-    var companyLinks = Array.prototype.slice.call(document.querySelectorAll(COMPANY_SEL))
-      .filter(function (el) {
-        return isVisible(el) && text(el).length > 1 && text(el).length < 120;
-      });
-
-    for (var i = 0; i < companyLinks.length; i++) {
-      var card = supplierCardFor(companyLinks[i], claimed);
-      if (!card) continue;
-      claimed.push(card);
-      cards.push({ card: card, companyLink: companyLinks[i], link: productLinksWithin(card)[0] || null });
-    }
-
-    if (cards.length < 3) cards = cards.concat(supplierCardsFromProductLinks());
-    return cards;
-  }
-
   /**
-   * The company name, cleaned of the badges that sit next to it.
+   * Strip the badges that sit next to a company name.
    * "Zhuji Yuanheng Sewing Equipment Co., Ltd.  Zhejiang. CN  1yr  Verified"
-   * must come back as the company only, not the whole header line.
+   * must come back as the company only.
+   *
+   * Every alternation must be wrapped: an ungrouped "A|B" turns the leading
+   * "\s+" into one optional alternative among many, which silently eats the
+   * last letters of any company whose name ends in a two-letter code
+   * (SOURCING -> SOURCG).
    */
   function cleanCompanyName(s) {
-    var out = clean(s);
-// Trailing flag code / province / badges, in the order Alibaba renders them.
-    // Every alternation must be wrapped: an ungrouped "A|B" turns the leading
-    // "\s+" into one optional alternative among many, which silently eats the
-    // last letters of any company whose name ends in a two-letter code
-    // (SOURCING -> SOURCG).
-    out = out.replace(/\s+/g, ' ');
+    var out = clean(s).replace(/\s+/g, ' ');
     out = out.replace(new RegExp('\\s+(?:' + COUNTRY_NAMES + ')\\b.*$', 'i'), '');
     out = out.replace(new RegExp('\\s+(?:' + COUNTRY_CODES + ')\\b(?![\\d$€£¥₹₩A-Za-z]).*$'), '');
     out = out.replace(/\s+(?:\d{1,2}\s*\+?\s*(?:yr|yrs|year|years)|verified|gold|assessed|trade\s*assurance|supplier)\b.*$/i, '');
@@ -262,13 +370,13 @@ export function harvestSearchPage() {
     return out;
   }
 
-  /** Company name from the card header when the name is not a link. */
+  /** Last-resort name: the first card line that is not a label or a price. */
   function companyNameFromHeader(body) {
     var ls = lines(body);
-    for (var i = 0; i < Math.min(ls.length, 4); i++) {
+    for (var i = 0; i < Math.min(ls.length, 6); i++) {
       var line = ls[i];
       if (!line || line.length < 3 || line.length > 80) continue;
-      if (/min\.?\s*order|response|revenue|on-?time|reorder|verified|yrs?\b|pieces|units|sets|matches/i.test(line)) continue;
+      if (/min\.?\s*order|response|revenue|on-?time|reorder|verified|\b\d{1,2}\s*\+?\s*(?:yr|yrs|year|years)\b|pieces|units|sets|matches|review|\/5|main\s*products?/i.test(line)) continue;
       if (/^[\d.,%$€£¥₹\-+ ]+$/.test(line)) continue;
       if (parseMoney(line)) continue;
       var name = cleanCompanyName(line);
@@ -277,121 +385,139 @@ export function harvestSearchPage() {
     return '';
   }
 
-  /**
-   * The tile that owns one product link: the smallest ancestor that holds this
-   * link alone and carries a price. Pairing prices to products by position in
-   * the card is the fallback for flat layouts.
-   */
-  function tileFor(link, card) {
-    var node = link;
-    for (var i = 0; i < 6 && node && node !== card; i++) {
-      node = node.parentElement;
-      if (!node) return null;
-      if (node.querySelectorAll(PRODUCT_SEL).length > 1) return null;
-      var t = text(node);
-      if (!t) continue;
-      if (t.length > 400) return null;
-      if (MONEY_RE.test(t)) return node;
-    }
-    return null;
-  }
-
-  function parseSupplierCard(entry) {
-    var card = entry.card;
+  function parseSupplierCard(card) {
     var body = text(card);
-    var headLines = lines(body).slice(0, 6).join(' | ');
-    var products = productLinksWithin(card);
+    var p = params(card);
+    var header = all(card, 'span[title], div[title], h1, h2, h3, h4')
+      .filter(function (el) { return !inProductTile(el, card); })
+      .slice(0, 6)
+      .map(function (el) { return text(el); })
+      .join(' | ');
+    // The header block is the first few lines of the card: name, province,
+    // country, rating, reviews, years, and the action buttons.
+    var headerLines = lines(body).slice(0, 8).join(' | ');
 
-    // ---- product tiles: what this supplier actually sells, and for how much.
-    // Prices and titles both appear as their own lines and Alibaba renders the
-    // tiles left to right. Reading labels and structure rather than class names
-    // is what survives a redesign — the class names churn, the labels do not.
+    // The name reader needs the card text with its line breaks intact: the
+    // joined header is one long line, so every candidate line would fail the
+    // "is this a label?" filter and the name would come back empty.
+    var name = nameFromHeader(card) || companyNameFromHeader(body);
+    var where = countryFromCard(card, headerLines, body);
+    var metrics = parseMetrics(body);
+    var moq = parseMoq(body);
+
+    // ---- the supplier's own products, each with its own price and MOQ
     var offers = [];
     var seenOffer = {};
-    function addOffer(title, money, url) {
-      if (!money || offers.length >= 6) return;
-      var key = money.currency + '|' + money.from + '|' + (money.to || '');
+    function addOffer(offer) {
+      if (!offer || offers.length >= 6) return;
+      var key = offer.currency + '|' + offer.from + '|' + (offer.to || '');
       if (seenOffer[key]) return;
       seenOffer[key] = true;
-      offers.push({
-        title: title || '',
+      offers.push(offer);
+    }
+
+    var tiles = all(card, TILE_SEL).filter(isVisible);
+    for (var t = 0; t < tiles.length; t++) {
+      var tileText = text(tiles[t]);
+      // "US$4.20-5.10  Min. order: 10 pieces" — the price and the minimum are
+      // two separate facts printed in the same tile, so read them apart.
+      var linesInTile = lines(tileText);
+      var money = null;
+      for (var l = 0; l < linesInTile.length; l++) {
+        if (/min\.?\s*order/i.test(linesInTile[l])) continue;
+        money = parseMoney(linesInTile[l]);
+        if (money) break;
+      }
+      if (!money) continue;
+      var href = tiles[t].href || tiles[t].getAttribute('href') || '';
+      var tileMoq = parseMoq(tileText);
+      addOffer({
+        title: titleFromProductUrl(href),
         from: money.from,
         to: money.to,
         currency: money.currency,
-        url: url || '',
+        url: href.split('?')[0],
+        moqQty: tileMoq.moqQty,
+        moqUnit: tileMoq.moqUnit,
       });
     }
-    function linkTitle(l) {
-      return clean(l.getAttribute('title') || l.getAttribute('aria-label') || text(l));
-    }
 
-    for (var p = 0; p < products.length; p++) {
-      var tile = tileFor(products[p], card);
-      if (!tile) continue;
-      addOffer(linkTitle(products[p]), parseMoney(text(tile)), products[p].href.split('?')[0]);
-    }
-
+    // Older layout: no product-tile markers at all. Fall back to the card's own
+    // price lines, paired with its product links in the order they are printed.
     if (offers.length === 0) {
-      // Flat layout: pair the card's price lines with the product links in DOM
-      // order. The "min. order" line is a price-tier box, not an offer.
-      var ls = lines(body);
       var priceLines = [];
-      for (var i = 0; i < ls.length; i++) {
-        if (/min\.?\s*order/i.test(ls[i])) continue;
-        var money = parseMoney(ls[i]);
-        if (money) priceLines.push(money);
+      var cardLines = lines(body);
+      for (var pi = 0; pi < cardLines.length; pi++) {
+        if (/min\.?\s*order/i.test(cardLines[pi])) continue;
+        var mm = parseMoney(cardLines[pi]);
+        if (mm) priceLines.push(mm);
       }
-      for (var k = 0; k < priceLines.length; k++) {
-        var lk = products[k];
-        addOffer(lk ? linkTitle(lk) : '', priceLines[k], lk ? lk.href.split('?')[0] : '');
+      var linksInCard = all(card, PRODUCT_SEL).filter(isVisible);
+      for (var qi = 0; qi < priceLines.length; qi++) {
+        var lk = linksInCard[qi];
+        var href2 = lk ? String(lk.href || lk.getAttribute('href') || '').split('?')[0] : '';
+        var label = lk ? clean(lk.getAttribute('title') || '') : '';
+        // A link whose text is the price itself (an image-only tile) gives us no
+        // title, so fall back to the slug in its URL.
+        if (!label || parseMoney(label)) label = titleFromProductUrl(href2);
+        addOffer({
+          title: label,
+          from: priceLines[qi].from,
+          to: priceLines[qi].to,
+          currency: priceLines[qi].currency,
+          url: href2,
+          moqQty: moq.moqQty,
+          moqUnit: moq.moqUnit,
+        });
       }
     }
 
-    // Cheapest published offer becomes the headline price for the comparison.
     var best = null;
     for (var o = 0; o < offers.length; o++) {
       if (!best || offers[o].from < best.from) best = offers[o];
     }
 
-    var companyName = entry.companyLink
-      ? cleanCompanyName(text(entry.companyLink))
-      : companyNameFromHeader(body);
-    if (!companyName && products.length) companyName = linkTitle(products[0]).slice(0, 60);
-
-    var headerCountry = findCountry(headLines);
-    var metrics = parseMetrics(body);
-    var moq = parseMoq(body);
-    var years = grab(body, /(\d{1,2})\s*\+?\s*(?:yr|yrs|year|years)\b/i);
-
+    // The company itself is the row, so the headline product is the cheapest
+    // thing it sells and the MOQ that goes with it is the one that matters.
     var record = {
-      productId: '',
+      productId: p.companyId ? 'co' + p.companyId : '',
+      title: best && best.title ? best.title : (mainProductsFrom(card)[0] || name),
       sourceUrl: best && best.url ? best.url : '',
-      title: best && best.title ? best.title : (offers[0] ? offers[0].title : companyName),
-      companyName: companyName,
-      companyUrl: entry.companyLink ? entry.companyLink.href.split('?')[0] : '',
-      country: headerCountry || findCountry(body),
-      yearsOnPlatform: years !== null ? Number(years) : null,
-      verifiedSupplier: /(?:^|[\s|])(verified|gold\s*supplier|assessed\s*supplier)(?:$|[\s|])/i.test(headLines),
+      companyName: cleanCompanyName(name),
+      companyUrl: '',
+      country: where.country,
+      province: where.province,
+      rating: ratingFromCard(card, headerLines, body),
+      reviewCount: reviewsFromCard(card, body),
+      mainProducts: mainProductsFrom(card),
+      yearsOnPlatform: yearsFromCard(card, body),
+      verifiedSupplier: /(verified|assured)\s*supplier|\bverified\b/i.test(header),
       tradeAssurance: /trade\s*assurance/i.test(body),
-      businessType: /factory|manufacturer|production\s*base|\bft\b/i.test(body) ? 'Manufacturer' : '',
-      moqQty: moq.moqQty,
-      moqUnit: moq.moqUnit,
+      // isFactory is Alibaba's own flag, which is better evidence than a
+      // keyword search over the card text.
+      // Alibaba's own isFactory flag is the best evidence; a company whose own
+      // name says "Factory" is a factory even when the flag is not set; and a
+      // trading company is named as one.
+      businessType: p.isFactory === true ||
+        /custom\s*manufacturer|verified\s*custom\s*manufacturer/i.test(body) ||
+        /\b(factory|manufactur\w*|producing|weaver|textile|garment\w*|knit\w*)\b/i.test(name)
+        ? 'Manufacturer'
+        : (/trading\s*co|general\s*partnership|\bco\.?\s*,?\s*ltd\b|limited/i.test(name)
+            ? 'Trading Company' : ''),
+      moqQty: best && best.moqQty !== null ? best.moqQty : moq.moqQty,
+      moqUnit: best && best.moqUnit ? best.moqUnit : moq.moqUnit,
       onTimeDelivery: metrics.onTimeDelivery,
       reorderRate: metrics.reorderRate,
       responseRate: metrics.responseRate,
       onlineRevenue: metrics.onlineRevenue,
       leadTime: '',
-      currency: best ? best.currency : '',
+      currency: best ? best.currency : (parseMoney(body) || { currency: '' }).currency,
       priceTiers: best ? [{ minQty: 1, maxQty: null, unitPrice: best.from }] : [],
       priceTo: best ? best.to : null,
       products: offers,
       raw: body.slice(0, 400),
     };
-    if (!record.currency) {
-      var anyMoney = parseMoney(body);
-      record.currency = anyMoney ? anyMoney.currency : '';
-    }
-    if (!record.productId) record.productId = (companyName + '|' + record.title).slice(0, 80);
+    if (!record.productId) record.productId = (record.companyName + '|' + record.title).slice(0, 80);
     return record;
   }
 
@@ -469,34 +595,33 @@ export function harvestSearchPage() {
   if (/SearchScene=suppliers/i.test(u) || /[?&]scene=suppliers/i.test(u)) scene = 'suppliers';
   else if (/\/companies?\//i.test(location.pathname) || /company-detail/i.test(u)) scene = 'suppliers';
 
-  var entries;
+  var records = [];
   if (scene === 'suppliers') {
-    entries = collectSupplierCards().map(function (e) {
-      return { card: e.card, companyLink: e.companyLink, link: e.link };
-    });
+    var supplierCards = collectSupplierCards();
+    var byId = {};
+    for (var s = 0; s < supplierCards.length; s++) {
+      var sup = parseSupplierCard(supplierCards[s]);
+      if (!sup || !sup.companyName) continue;
+      // The same company can appear twice on one page (two company ids, or a
+      // card rendered twice by the virtual list). Key on the company id.
+      var key = sup.productId || sup.companyName;
+      if (byId[key]) continue;
+      byId[key] = true;
+      records.push(sup);
+    }
   } else {
     var claimed2 = [];
-    var seen2 = [];
-    var links2 = Array.prototype.slice.call(document.querySelectorAll(PRODUCT_SEL)).filter(isVisible);
-    entries = [];
+    var links2 = all(document, PRODUCT_SEL).filter(isVisible);
     for (var i2 = 0; i2 < links2.length; i2++) {
       var card2 = offerCardFor(links2[i2]);
-      if (!card2 || seen2.indexOf(card2) !== -1) continue;
-      seen2.push(card2);
+      if (!card2 || claimed2.indexOf(card2) !== -1) continue;
       claimed2.push(card2);
-      entries.push({ card: card2, companyLink: null, link: links2[i2] });
+      var rec = parseOfferCard({ card: card2, link: links2[i2] });
+      if (rec && (rec.companyName || rec.title)) records.push(rec);
     }
   }
 
-  var records = [];
-  for (var c = 0; c < entries.length; c++) {
-    var rec = scene === 'suppliers'
-      ? parseSupplierCard(entries[c])
-      : parseOfferCard(entries[c]);
-    if (rec && (rec.companyName || rec.title)) records.push(rec);
-  }
-
-  // Collapse duplicate suppliers that appear on the same page.
+  // One company can own several cards on the page; keep the cheapest offer.
   var seenKeys = {};
   var unique = [];
   for (var r = 0; r < records.length; r++) {

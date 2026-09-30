@@ -247,6 +247,14 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
+/* The active-filter line is information, not a warning, so it stays readable
+   rather than shouting in the same colour as a real problem. */
+.fx-filters {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  font-weight: 500;
+}
+
 .matrix-scroll {
   flex: 1 1 auto; min-height: 0; overflow: auto;
   overscroll-behavior: contain;

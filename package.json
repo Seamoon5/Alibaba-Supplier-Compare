@@ -9,7 +9,8 @@
     "test": "node --test test/*.test.js",
     "icons": "python3 tools/make_icon.py",
     "preview": "node tools/panel-preview.mjs",
-    "verify": "node tools/verify.mjs",
-    "live-test": "node tools/live-test.mjs"
+    "verify": "node tools/verify.mjs && node tools/panel-preview.mjs",
+    "live-test": "node tools/live-test.mjs",
+    "test:real": "node tools/real-page-test.mjs"
   }
 }

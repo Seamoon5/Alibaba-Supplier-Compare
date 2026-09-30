@@ -29,6 +29,13 @@ const COLUMNS = [
   { label: 'Product', get: (c, r) => r.title },
   { label: 'Supplier', get: (c, r) => r.companyName },
   { label: 'Country', get: (c, r) => r.country },
+  { label: 'Location', get: (c, r) => (r.province ? `${r.province}, ${r.country}` : r.country) },
+  { label: 'Rating', get: (c, r) => (r.rating ? `${r.rating}/5` : '') },
+  { label: 'Reviews', get: (c, r) => r.reviewCount ?? '' },
+  {
+    label: 'Main products',
+    get: (c, r) => (Array.isArray(r.mainProducts) ? r.mainProducts.join(', ') : ''),
+  },
   { label: 'Business type', get: (c, r) => r.businessType },
   { label: 'Currency', get: (c, r) => r.currency },
   { label: 'Unit price at Qty', get: (c) => c.unitPrice ?? '' },
@@ -37,11 +44,15 @@ const COLUMNS = [
   { label: 'Order qty used', get: (c) => c.orderQty ?? '' },
   { label: 'Total', get: (c) => c.total ?? '' },
   { label: 'Products listed', get: (_c, r) => (Array.isArray(r.products) ? r.products.length : 0) },
+  { label: 'Each product MOQ', get: (_c, r) =>
+      (Array.isArray(r.products)
+        ? r.products.map((p) => (p.moqQty === null || p.moqQty === undefined ? '?' : `${p.moqQty} ${p.moqUnit || ''}`.trim())).join(', ')
+        : '') },
   {
     label: 'Other products',
     get: (_c, r) =>
       (Array.isArray(r.products) ? r.products.slice(1) : [])
-        .map((p) => `${p.title} ${p.from}${isHigherOffer(p) ? '-' + p.to : ''}`)
+        .map((p) => `${p.title} ${p.from}${isHigherOffer(p) ? '-' + p.to : ''}${p.moqQty ? ` (min ${p.moqQty})` : ''}`)
         .join(' | '),
   },
   { label: 'MOQ', get: (c, r) => r.moqQty ?? '' },
