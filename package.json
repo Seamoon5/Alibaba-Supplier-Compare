@@ -1,6 +1,6 @@
 {
   "name": "alibaba-supplier-compare",
-  "version": "1.2.0",
+  "version": "2.2.0",
   "description": "Chrome MV3 extension that compares Alibaba suppliers side by side: tiered prices at a target quantity, MOQ, credentials, and export to Sheets.",
   "private": true,
   "type": "module",
